@@ -144,7 +144,7 @@ PORT=3001
 
 Track what is done so Kiro never regenerates completed modules:
 
-- [x] Phase 1 — Foundation: Auth ✓, Uploads ✓, Classes (DTOs only — no service/controller yet)
+- [x] Phase 1 — Foundation: Auth ✓, Uploads ✓, Classes ✓
 - [ ] Phase 2 — Core Learning: Activities, Submissions
 - [ ] Phase 3 — Portfolio: Journal, Assessment
 - [ ] Phase 4 — Communication: Messaging, Notifications
@@ -154,5 +154,6 @@ Track what is done so Kiro never regenerates completed modules:
 **Completed Modules:**
 - ✅ Auth (authentication, JWT, Google OAuth, QR login)
 - ✅ Uploads (S3 presigned URLs, CloudFront signed URLs)
+- ✅ Classes (class management, co-teachers, roster import, family invites, class codes)
 
 Update this checklist as modules are completed.

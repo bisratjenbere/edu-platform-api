@@ -1,0 +1,471 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  SUPER_ADMIN
+  DISTRICT_ADMIN
+  SCHOOL_ADMIN
+  TEACHER
+  STUDENT
+  FAMILY
+}
+
+enum GradeLevel {
+  PREK
+  K
+  G1
+  G2
+  G3
+  G4
+  G5
+}
+
+enum ActivityStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BlockType {
+  TEXT
+  VOICE_INSTRUCTION
+  VIDEO_INSTRUCTION
+  IMAGE
+  PDF
+  LINK
+  DRAWING_CANVAS
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  POLL
+  DRAG_DROP
+  SHORT_ANSWER
+  OPEN_ENDED
+}
+
+enum SubmissionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  RETURNED
+  APPROVED
+}
+
+enum AssignedTo {
+  WHOLE_CLASS
+  INDIVIDUAL
+}
+
+enum ThreadType {
+  DIRECT
+  GROUP
+  ANNOUNCEMENT
+}
+
+enum Platform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum JournalPostType {
+  ACTIVITY_SUBMISSION
+  TEACHER_POST
+  STUDENT_SELF_POST
+}
+
+enum JournalPostStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum CoTeacherRole {
+  PRIMARY
+  CO_TEACHER
+}
+
+enum FluencyStatus {
+  PENDING
+  PROCESSING
+  COMPLETE
+  ERROR
+}
+
+enum FamilyStudentStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+// ============================================================
+// CORE MODELS
+// ============================================================
+
+model District {
+  id         String   @id @default(uuid())
+  name       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  deleted_at DateTime?
+  schools    School[]
+}
+
+model School {
+  id                    String   @id @default(uuid())
+  name                  String
+  district_id           String
+  timezone              String   @default("America/New_York")
+  clever_enabled        Boolean  @default(false)
+  clever_district_token String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  deleted_at            DateTime?
+  district              District @relation(fields: [district_id], references: [id])
+  users                 User[]
+  classes               Class[]
+}
+
+model User {
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  password_hash      String?
+  first_name         String    @default("")
+  last_name          String    @default("")
+  role               Role      @default(STUDENT)
+  google_id          String?   @unique
+  clever_id          String?   @unique
+  school_id          String?
+  is_active          Boolean   @default(true)
+  last_login_at      DateTime?
+  preferred_language String?   @default("en")
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  deleted_at         DateTime?
+  school             School?   @relation(fields: [school_id], references: [id])
+  devices            UserDevice[]
+  classes_teaching   ClassTeacher[]
+  classes_studying   ClassStudent[]
+  activities_created Activity[]
+  activity_assignments ActivityAssignment[]
+  submissions        Submission[]
+  family_connections FamilyStudent[] @relation("FamilyMember")
+  student_family_links FamilyStudent[] @relation("StudentFamily")
+  family_invites_sent FamilyStudent[] @relation("FamilyInviter")
+}
+
+model Class {
+  id          String      @id @default(uuid())
+  name        String
+  subject     String?
+  grade_level GradeLevel?
+  school_year String
+  cover_color String      @default("#4F46E5")
+  school_id   String
+  is_archived Boolean     @default(false)
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @updatedAt
+  deleted_at  DateTime?
+  school      School      @relation(fields: [school_id], references: [id])
+  teachers    ClassTeacher[]
+  students    ClassStudent[]
+  activities  Activity[]
+  family_students FamilyStudent[]
+  class_codes ClassCode[]
+}
+
+model ClassTeacher {
+  class_id   String
+  teacher_id String
+  role       CoTeacherRole @default(PRIMARY)
+  joined_at  DateTime      @default(now())
+  class      Class         @relation(fields: [class_id], references: [id])
+  teacher    User          @relation(fields: [teacher_id], references: [id])
+  @@id([class_id, teacher_id])
+}
+
+model ClassStudent {
+  class_id     String
+  student_id   String
+  avatar_emoji String   @default("🐶")
+  joined_at    DateTime @default(now())
+  is_active    Boolean  @default(true)
+  class        Class    @relation(fields: [class_id], references: [id])
+  student      User     @relation(fields: [student_id], references: [id])
+  @@id([class_id, student_id])
+}
+
+model FamilyStudent {
+  id          String              @id @default(uuid())
+  family_id   String
+  student_id  String
+  class_id    String
+  status      FamilyStudentStatus @default(PENDING)
+  invited_by  String
+  invited_at  DateTime            @default(now())
+  accepted_at DateTime?
+  created_at  DateTime            @default(now())
+  updated_at  DateTime            @updatedAt
+  deleted_at  DateTime?
+  family      User                @relation("FamilyMember", fields: [family_id], references: [id])
+  student     User                @relation("StudentFamily", fields: [student_id], references: [id])
+  class       Class               @relation(fields: [class_id], references: [id])
+  inviter     User                @relation("FamilyInviter", fields: [invited_by], references: [id])
+
+  @@unique([family_id, student_id, class_id])
+  @@index([student_id])
+  @@index([family_id])
+  @@index([class_id])
+}
+
+model ClassCode {
+  id         String   @id @default(uuid())
+  class_id   String
+  code       String   @unique
+  created_by String
+  expires_at DateTime
+  created_at DateTime @default(now())
+  class      Class    @relation(fields: [class_id], references: [id])
+
+  @@index([class_id])
+  @@index([code])
+}
+
+model Activity {
+  id                   String         @id @default(uuid())
+  title                String
+  description          String?
+  class_id             String
+  created_by           String
+  status               ActivityStatus @default(DRAFT)
+  due_date             DateTime?
+  scheduled_publish_at DateTime?
+  assigned_to          AssignedTo     @default(WHOLE_CLASS)
+  is_from_library      Boolean        @default(false)
+  library_source_id    String?
+  standards_tags       String[]
+  subject_tag          String?
+  grade_level_tag      String?
+  created_at           DateTime       @default(now())
+  updated_at           DateTime       @updatedAt
+  deleted_at           DateTime?
+  class                Class          @relation(fields: [class_id], references: [id])
+  creator              User           @relation(fields: [created_by], references: [id])
+  blocks               ActivityBlock[]
+  assignments          ActivityAssignment[]
+  submissions          Submission[]
+}
+
+model ActivityBlock {
+  id          String    @id @default(uuid())
+  activity_id String
+  order       Int
+  type        BlockType
+  content     Json
+  is_required Boolean   @default(true)
+  created_at  DateTime  @default(now())
+  activity    Activity  @relation(fields: [activity_id], references: [id])
+  @@unique([activity_id, order])
+}
+
+model ActivityAssignment {
+  activity_id         String
+  student_id          String
+  custom_instructions String?
+  assigned_at         DateTime @default(now())
+  activity            Activity @relation(fields: [activity_id], references: [id])
+  student             User     @relation(fields: [student_id], references: [id])
+  @@id([activity_id, student_id])
+}
+
+model Submission {
+  id                         String           @id @default(uuid())
+  activity_id                String
+  student_id                 String
+  class_id                   String
+  status                     SubmissionStatus @default(NOT_STARTED)
+  started_at                 DateTime?
+  submitted_at               DateTime?
+  returned_at                DateTime?
+  approved_at                DateTime?
+  teacher_feedback_text      String?
+  teacher_feedback_audio_url String?
+  score                      Float?
+  max_score                  Float?
+  created_at                 DateTime         @default(now())
+  updated_at                 DateTime         @updatedAt
+  activity                   Activity         @relation(fields: [activity_id], references: [id])
+  student                    User             @relation(fields: [student_id], references: [id])
+  blocks                     SubmissionBlock[]
+  journal_post               JournalPost?
+}
+
+model SubmissionBlock {
+  id               String     @id @default(uuid())
+  submission_id    String
+  block_id         String
+  response_content Json
+  auto_score       Float?
+  annotation_json  String?
+  created_at       DateTime   @default(now())
+  submission       Submission @relation(fields: [submission_id], references: [id])
+}
+
+model JournalPost {
+  id            String            @id @default(uuid())
+  student_id    String
+  class_id      String
+  activity_id   String?
+  submission_id String?           @unique
+  type          JournalPostType
+  status        JournalPostStatus @default(PENDING_APPROVAL)
+  content_text  String?
+  media_urls    String[]
+  approved_by   String?
+  approved_at   DateTime?
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
+  deleted_at    DateTime?
+  submission    Submission?       @relation(fields: [submission_id], references: [id])
+  reactions     JournalReaction[]
+  comments      JournalComment[]
+}
+
+model JournalReaction {
+  id         String      @id @default(uuid())
+  post_id    String
+  user_id    String
+  type       String      @default("HEART")
+  created_at DateTime    @default(now())
+  post       JournalPost @relation(fields: [post_id], references: [id])
+  @@unique([post_id, user_id])
+}
+
+model JournalComment {
+  id          String      @id @default(uuid())
+  post_id     String
+  author_id   String
+  author_role String
+  content     String
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @updatedAt
+  deleted_at  DateTime?
+  post        JournalPost @relation(fields: [post_id], references: [id])
+}
+
+model MessageThread {
+  id            String              @id @default(uuid())
+  class_id      String
+  thread_type   ThreadType
+  created_by    String
+  subject       String?
+  allow_replies Boolean             @default(true)
+  created_at    DateTime            @default(now())
+  updated_at    DateTime            @updatedAt
+  participants  ThreadParticipant[]
+  messages      Message[]
+}
+
+model ThreadParticipant {
+  thread_id    String
+  user_id      String
+  last_read_at DateTime?
+  thread       MessageThread @relation(fields: [thread_id], references: [id])
+  @@id([thread_id, user_id])
+}
+
+model Message {
+  id                String        @id @default(uuid())
+  thread_id         String
+  sender_id         String
+  body              String
+  attachments       Json          @default("[]")
+  translated_bodies Json          @default("{}")
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+  deleted_at        DateTime?
+  thread            MessageThread @relation(fields: [thread_id], references: [id])
+}
+
+model UserDevice {
+  id           String   @id @default(uuid())
+  user_id      String
+  token        String   @unique
+  platform     Platform
+  created_at   DateTime @default(now())
+  last_seen_at DateTime @default(now())
+  user         User     @relation(fields: [user_id], references: [id])
+}
+
+model NotificationPreference {
+  id                String  @id @default(uuid())
+  user_id           String
+  notification_type String
+  enabled           Boolean @default(true)
+  @@unique([user_id, notification_type])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actor_id      String
+  action        String
+  resource_type String
+  resource_id   String?
+  metadata      Json     @default("{}")
+  ip_address    String?
+  created_at    DateTime @default(now())
+}
+
+model ActivityTemplate {
+  id              String      @id @default(uuid())
+  title           String
+  description     String?
+  subject         String?
+  grade_level     GradeLevel?
+  standards_tags  String[]
+  created_by      String
+  is_published    Boolean     @default(false)
+  view_count      Int         @default(0)
+  copy_count      Int         @default(0)
+  avg_rating      Float       @default(0)
+  rating_count    Int         @default(0)
+  thumbnail_url   String?
+  blocks_snapshot Json
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+}
+
+model FluencyAssessment {
+  id            String        @id @default(uuid())
+  student_id    String
+  teacher_id    String
+  class_id      String
+  passage_text  String
+  recording_url String?
+  transcript    String?
+  analysis      Json?
+  status        FluencyStatus @default(PENDING)
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @updatedAt
+}
+
+model AiUsageLog {
+  id                String   @id @default(uuid())
+  teacher_id        String
+  feature           String
+  prompt_tokens     Int
+  completion_tokens Int
+  created_at        DateTime @default(now())
+}
