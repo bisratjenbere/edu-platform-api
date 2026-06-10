@@ -154,6 +154,7 @@ Track what is done so Kiro never regenerates completed modules:
 **Completed Modules:**
 - ✅ Auth (authentication, JWT, Google OAuth, QR login)
 - ✅ Uploads (S3 presigned URLs, CloudFront signed URLs)
+- 🔄 Classes (DTOs + services + controller done — BullMQ jobs, tests, frontend pending)
 - ✅ Classes (class management, co-teachers, roster import, family invites, class codes)
 
 Update this checklist as modules are completed.
