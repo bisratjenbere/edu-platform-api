@@ -127,7 +127,7 @@ export class MessagesService {
     senderId: string,
     dto: SendMessageDto,
   ): Promise<Message> {
-    // Verify sender is participant in thread
+    // Verify sender is participant in thread and get thread details
     const participant = await this.prisma.threadParticipant.findUnique({
       where: {
         thread_id_user_id: {
@@ -147,11 +147,17 @@ export class MessagesService {
       );
     }
 
+    // Get thread to check allow_replies
+    const thread = await this.prisma.messageThread.findUnique({
+      where: { id: threadId },
+    });
+
+    if (!thread) {
+      throw new ForbiddenException('Thread not found');
+    }
+
     // Check if thread allows replies (if sender is not the creator and allow_replies = false)
-    if (
-      !participant.thread.allow_replies &&
-      participant.thread.created_by !== senderId
-    ) {
+    if (!thread.allow_replies && thread.created_by !== senderId) {
       throw new ForbiddenException('Replies are disabled for this thread');
     }
 
