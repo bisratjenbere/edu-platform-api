@@ -41,6 +41,10 @@ Thumbs.db
 *_SUMMARY.md
 RUN_MIGRATION.md
 
+# Kiro agent files — local development only
+.kiro/
+AGENTS.md
+
 # IDE
 .vscode/settings.json
 .vscode/launch.json
