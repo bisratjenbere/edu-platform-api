@@ -84,6 +84,30 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Set a key with expiry (in seconds)
+   */
+  async setex(key: string, seconds: number, value: string): Promise<'OK'> {
+    try {
+      return await this.client.setex(key, seconds, value);
+    } catch (error: any) {
+      this.logger.warn(`Redis SETEX error for key ${key}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Increment a key's value
+   */
+  async incr(key: string): Promise<number> {
+    try {
+      return await this.client.incr(key);
+    } catch (error: any) {
+      this.logger.warn(`Redis INCR error for key ${key}: ${error.message}`);
+      throw error;
+    }
+  }
+
   async onModuleDestroy() {
     await this.client.quit();
     this.logger.log('Redis connection closed');
