@@ -26,6 +26,7 @@
     "@aws-sdk/client-s3": "^3.1065.0",
     "@aws-sdk/cloudfront-signer": "^3.1064.0",
     "@aws-sdk/s3-request-presigner": "^3.1065.0",
+    "@google-cloud/translate": "^9.4.2",
     "@nestjs/bull": "^10.2.3",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^4.0.4",
