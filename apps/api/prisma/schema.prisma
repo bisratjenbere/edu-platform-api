@@ -313,14 +313,29 @@ model Submission {
 }
 
 model SubmissionBlock {
-  id               String     @id @default(uuid())
+  id               String                   @id @default(uuid())
   submission_id    String
   block_id         String
   response_content Json
   auto_score       Float?
   annotation_json  String?
-  created_at       DateTime   @default(now())
-  submission       Submission @relation(fields: [submission_id], references: [id])
+  created_at       DateTime                 @default(now())
+  updated_at       DateTime                 @updatedAt
+  submission       Submission               @relation(fields: [submission_id], references: [id])
+  revisions        SubmissionBlockRevision[]
+
+  @@index([submission_id])
+}
+
+model SubmissionBlockRevision {
+  id                  String          @id @default(uuid())
+  submission_block_id String
+  response_content    Json
+  revision_number     Int
+  created_at          DateTime        @default(now())
+  submission_block    SubmissionBlock @relation(fields: [submission_block_id], references: [id])
+
+  @@index([submission_block_id, revision_number])
 }
 
 model JournalPost {

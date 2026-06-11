@@ -37,6 +37,10 @@ apps/api/prisma/migrations/migration_lock.toml
 .DS_Store
 Thumbs.db
 
+# Auto-generated summary files
+*_SUMMARY.md
+RUN_MIGRATION.md
+
 # IDE
 .vscode/settings.json
 .vscode/launch.json

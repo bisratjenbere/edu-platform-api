@@ -2,11 +2,11 @@
 
 ## Implementation order (follow this sequence exactly)
 
-- [ ] Task 1: DTOs
+- [x] Task 1: DTOs
   - `update-submission-block.dto.ts` — block_id (IsUUID), response_content (IsObject)
   - `teacher-feedback.dto.ts` — status (IsEnum SubmissionStatus, only RETURNED/APPROVED allowed), feedback_text (IsString, optional, max 5000), feedback_audio_url (IsString, optional)
 
-- [ ] Task 2: SubmissionsService — core status transitions
+- [x] Task 2: SubmissionsService — core status transitions
   - `getInbox(studentId, classId?)` — return assigned activities with submission status, ordered by due_date ASC
   - `findOne(submissionId, requesterId)` — include all SubmissionBlocks, verify requester is student owner or class teacher
   - `start(submissionId, studentId)` — verify NOT_STARTED, set status = IN_PROGRESS, set started_at
@@ -14,7 +14,7 @@
   - `submit(submissionId, studentId)` — verify IN_PROGRESS, set status = SUBMITTED, set submitted_at, trigger auto-grade, enqueue push notification (SUBMISSION_RECEIVED) to teacher, emit WebSocket event
   - `updateFeedback(submissionId, teacherId, dto)` — verify teacher owns activity's class, update status + feedback fields, enqueue push notification (ACTIVITY_RETURNED) to student if RETURNED
 
-- [ ] Task 3: AutoGradeService
+- [x] Task 3: AutoGradeService
   - `grade(submissionId)` — run after submit(), read all SubmissionBlocks, score each against ActivityBlock content
   - MULTIPLE_CHOICE: `score = selectedOptionId === correctOptionId ? 1 : 0`
   - TRUE_FALSE: `score = answer === correctAnswer ? 1 : 0`
@@ -24,7 +24,7 @@
   - Update Submission.score (sum of block scores) and Submission.max_score (count of gradeable blocks)
   - Full unit tests: all 3 question types, partial drag-drop, mixed block submission
 
-- [ ] Task 4: SubmissionsController — all endpoints
+- [x] Task 4: SubmissionsController — all endpoints
   - `@Roles(Role.STUDENT)` on start, saveBlock, submit
   - `@Roles(Role.TEACHER)` on updateFeedback, annotation
   - `@Roles(Role.STUDENT, Role.TEACHER, Role.FAMILY)` on GET endpoints (scoped by service)
