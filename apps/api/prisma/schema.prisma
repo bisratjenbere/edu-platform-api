@@ -176,6 +176,8 @@ model User {
   family_invites_sent FamilyStudent[] @relation("FamilyInviter")
   thread_participations ThreadParticipant[] @relation("ThreadParticipants")
   messages_sent Message[] @relation("MessageSender")
+  templates_created ActivityTemplate[] @relation("TemplateCreator")
+  template_ratings TemplateRating[] @relation("TemplateRater")
 }
 
 model Class {
@@ -470,22 +472,44 @@ model AuditLog {
 }
 
 model ActivityTemplate {
-  id              String      @id @default(uuid())
+  id              String            @id @default(uuid())
   title           String
   description     String?
   subject         String?
   grade_level     GradeLevel?
   standards_tags  String[]
   created_by      String
-  is_published    Boolean     @default(false)
-  view_count      Int         @default(0)
-  copy_count      Int         @default(0)
-  avg_rating      Float       @default(0)
-  rating_count    Int         @default(0)
+  is_published    Boolean           @default(false)
+  view_count      Int               @default(0)
+  copy_count      Int               @default(0)
+  avg_rating      Float             @default(0)
+  rating_count    Int               @default(0)
   thumbnail_url   String?
   blocks_snapshot Json
-  created_at      DateTime    @default(now())
-  updated_at      DateTime    @updatedAt
+  created_at      DateTime          @default(now())
+  updated_at      DateTime          @updatedAt
+  deleted_at      DateTime?
+  creator         User              @relation("TemplateCreator", fields: [created_by], references: [id])
+  ratings         TemplateRating[]
+
+  @@index([is_published, deleted_at])
+  @@index([created_by])
+  @@index([grade_level, subject])
+}
+
+model TemplateRating {
+  id          String           @id @default(uuid())
+  template_id String
+  user_id     String
+  score       Int
+  review      String?
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @updatedAt
+  template    ActivityTemplate @relation(fields: [template_id], references: [id])
+  rater       User             @relation("TemplateRater", fields: [user_id], references: [id])
+
+  @@unique([template_id, user_id])
+  @@index([template_id])
 }
 
 model FluencyAssessment {

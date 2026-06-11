@@ -14,6 +14,7 @@ import { JournalModule } from './modules/journal/journal.module';
 import { AssessmentModule } from './modules/assessment/assessment.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { LibraryModule } from './modules/library/library.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { MessagesModule } from './modules/messages/messages.module';
     AssessmentModule,
     NotificationsModule,
     MessagesModule,
+    LibraryModule,
   ],
   controllers: [],
   providers: [
