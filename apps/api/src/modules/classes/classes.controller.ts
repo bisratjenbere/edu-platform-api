@@ -42,7 +42,7 @@ interface RequestWithUser {
 }
 
 @ApiTags('classes')
-@Controller('api/v1/classes')
+@Controller('classes')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class ClassesController {
