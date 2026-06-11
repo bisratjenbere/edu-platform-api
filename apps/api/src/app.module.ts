@@ -15,6 +15,7 @@ import { AssessmentModule } from './modules/assessment/assessment.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { LibraryModule } from './modules/library/library.module';
+import { CleverModule } from './modules/clever/clever.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { LibraryModule } from './modules/library/library.module';
     NotificationsModule,
     MessagesModule,
     LibraryModule,
+    CleverModule,
   ],
   controllers: [],
   providers: [
