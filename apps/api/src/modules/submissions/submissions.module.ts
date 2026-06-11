@@ -14,6 +14,10 @@ import { AutoGradeService } from './auto-grade.service';
       const { JournalModule } = require('../journal/journal.module');
       return JournalModule;
     }),
+    forwardRef(() => {
+      const { NotificationsModule } = require('../notifications/notifications.module');
+      return NotificationsModule;
+    }),
   ],
   controllers: [SubmissionsController],
   providers: [SubmissionsService, AutoGradeService],

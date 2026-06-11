@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../../prisma/prisma.module';
@@ -13,6 +13,10 @@ import { RosterImportService } from './roster-import.service';
     ConfigModule,
     JwtModule.register({}),
     PrismaModule,
+    forwardRef(() => {
+      const { NotificationsModule } = require('../notifications/notifications.module');
+      return NotificationsModule;
+    }),
   ],
   controllers: [ClassesController],
   providers: [

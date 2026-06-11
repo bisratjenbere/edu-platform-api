@@ -5,7 +5,14 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { SubmissionsModule } from '../submissions/submissions.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => SubmissionsModule)],
+  imports: [
+    PrismaModule,
+    forwardRef(() => SubmissionsModule),
+    forwardRef(() => {
+      const { NotificationsModule } = require('../notifications/notifications.module');
+      return NotificationsModule;
+    }),
+  ],
   controllers: [JournalController],
   providers: [JournalService],
   exports: [JournalService],

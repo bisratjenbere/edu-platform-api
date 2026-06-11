@@ -4,13 +4,16 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Redis } from 'ioredis';
 import { createHash } from 'crypto';
-import { Role, FamilyStudentStatus } from '@prisma/client';
+import { Role, FamilyStudentStatus, NotificationType } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface FamilyInvitePayload {
   familyStudentId: string;
@@ -27,6 +30,8 @@ export class FamilyInviteService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
   ) {
     const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
     this.redis = new Redis(redisUrl);
@@ -265,7 +270,22 @@ export class FamilyInviteService {
     // Delete Redis key (single-use after accept)
     await this.redis.del(`family_invite:${tokenHash}`);
 
-    // TODO: Log AuditLog entry (action: FAMILY_CONNECTED)
+    // Send FAMILY_CONNECTED push notification to teacher
+    const teacher = await this.prisma.user.findUnique({
+      where: { id: familyStudent.invited_by },
+    });
+
+    if (teacher) {
+      await this.notificationsService.sendToUser(teacher.id, {
+        type: NotificationType.FAMILY_CONNECTED,
+        title: 'Family Connected',
+        body: `A family member connected to ${familyStudent.student.first_name} ${familyStudent.student.last_name}`,
+        data: {
+          studentId: familyStudent.student_id,
+          classId: familyStudent.class_id,
+        },
+      });
+    }
 
     return {
       success: true,

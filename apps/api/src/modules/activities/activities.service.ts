@@ -3,6 +3,8 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -13,8 +15,10 @@ import {
   AssignedTo,
   CoTeacherRole,
   Activity,
+  NotificationType,
 } from '@prisma/client';
 import { CreateActivityDto, UpdateActivityDto } from './dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ActivitiesService {
@@ -22,6 +26,8 @@ export class ActivitiesService {
     private prisma: PrismaService,
     private redisService: RedisService,
     @InjectQueue('activity-scheduler') private schedulerQueue: Queue,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(teacherId: string, dto: CreateActivityDto): Promise<Activity> {
@@ -328,10 +334,19 @@ export class ActivitiesService {
           }),
         ),
       );
-    }
 
-    // TODO: Enqueue push notification job for NEW_ACTIVITY
-    // This will be implemented when the Notifications module is built
+      // Send NEW_ACTIVITY push notification to each student
+      const studentIds = students.map((s) => s.student_id);
+      await this.notificationsService.sendBulk(studentIds, {
+        type: NotificationType.NEW_ACTIVITY,
+        title: 'New Activity',
+        body: `${activity.title} has been assigned`,
+        data: {
+          activityId: activity.id,
+          classId: activity.class_id,
+        },
+      });
+    }
 
     return updatedActivity;
   }

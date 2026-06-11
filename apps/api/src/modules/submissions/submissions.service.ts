@@ -8,11 +8,12 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SubmissionStatus, Submission } from '@prisma/client';
+import { SubmissionStatus, Submission, NotificationType } from '@prisma/client';
 import { UpdateSubmissionBlockDto, TeacherFeedbackDto } from './dto';
 import { AutoGradeService } from './auto-grade.service';
 import { SubmissionStatusGateway } from '../activities/submission-status.gateway';
 import { JournalService } from '../journal/journal.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class SubmissionsService {
@@ -24,6 +25,8 @@ export class SubmissionsService {
     private submissionStatusGateway: SubmissionStatusGateway,
     @Inject(forwardRef(() => JournalService))
     private readonly journalService: JournalService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getInbox(studentId: string, classId?: string) {
@@ -278,8 +281,34 @@ export class SubmissionsService {
       updatedAt: updated.updated_at,
     });
 
-    // TODO: Enqueue push notification (SUBMISSION_RECEIVED) to teacher
-    // This will be implemented when Notifications module is built
+    // Send SUBMISSION_RECEIVED push notification to teacher
+    const activity = await this.prisma.activity.findUnique({
+      where: { id: submission.activity_id },
+      include: {
+        class: {
+          include: {
+            teachers: {
+              select: {
+                teacher_id: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (activity) {
+      const teacherIds = activity.class.teachers.map((t) => t.teacher_id);
+      await this.notificationsService.sendBulk(teacherIds, {
+        type: NotificationType.SUBMISSION_RECEIVED,
+        title: 'New Submission',
+        body: `A student submitted ${activity.title}`,
+        data: {
+          submissionId: updated.id,
+          activityId: submission.activity_id,
+        },
+      });
+    }
 
     return updated;
   }
@@ -366,8 +395,18 @@ export class SubmissionsService {
       }
     }
 
-    // TODO: Enqueue push notification (ACTIVITY_RETURNED) to student if RETURNED
-    // This will be implemented when Notifications module is built
+    // Send ACTIVITY_RETURNED push notification to student if RETURNED
+    if (dto.status === SubmissionStatus.RETURNED) {
+      await this.notificationsService.sendToUser(submission.student_id, {
+        type: NotificationType.ACTIVITY_RETURNED,
+        title: 'Activity Returned',
+        body: `Your ${submission.activity.title} submission has been returned`,
+        data: {
+          submissionId,
+          activityId: submission.activity_id,
+        },
+      });
+    }
 
     return updated;
   }

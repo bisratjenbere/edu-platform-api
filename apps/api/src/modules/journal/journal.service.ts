@@ -3,14 +3,21 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePostDto, RejectPostDto, AddCommentDto } from './dto';
-import { Role, JournalPostType, JournalPostStatus } from '@prisma/client';
+import { Role, JournalPostType, JournalPostStatus, NotificationType } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class JournalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /**
    * Get paginated journal feed for a student
@@ -290,8 +297,31 @@ export class JournalService {
       },
     });
 
-    // TODO: Enqueue push notification JOURNAL_POST_APPROVED to family members
-    // This will be implemented when notifications module is built
+    // Send JOURNAL_POST_APPROVED push notification to family members
+    const familyConnections = await this.prisma.familyStudent.findMany({
+      where: {
+        student_id: post.student_id,
+        class_id: post.class_id,
+        status: 'ACTIVE',
+        deleted_at: null,
+      },
+      select: {
+        family_id: true,
+      },
+    });
+
+    const familyIds = familyConnections.map((fc) => fc.family_id);
+    if (familyIds.length > 0) {
+      await this.notificationsService.sendBulk(familyIds, {
+        type: NotificationType.JOURNAL_POST_APPROVED,
+        title: 'New Journal Post',
+        body: 'A new post has been added to your child\'s journal',
+        data: {
+          postId: updatedPost.id,
+          studentId: post.student_id,
+        },
+      });
+    }
 
     return updatedPost;
   }

@@ -1,3 +1,5 @@
-export { NotificationsModule } from './notifications.module';
-export { NotificationsService } from './notifications.service';
+export * from './notifications.module';
+export * from './notifications.service';
+export * from './notifications.controller';
+export * from './devices.controller';
 export * from './dto';
