@@ -12,6 +12,7 @@ import { ActivitiesModule } from './modules/activities/activities.module';
 import { SubmissionsModule } from './modules/submissions/submissions.module';
 import { JournalModule } from './modules/journal/journal.module';
 import { AssessmentModule } from './modules/assessment/assessment.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { AssessmentModule } from './modules/assessment/assessment.module';
     SubmissionsModule,
     JournalModule,
     AssessmentModule,
+    NotificationsModule,
   ],
   controllers: [],
   providers: [

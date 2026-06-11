@@ -110,6 +110,16 @@ enum FamilyStudentStatus {
   REVOKED
 }
 
+enum NotificationType {
+  NEW_ACTIVITY
+  SUBMISSION_RECEIVED
+  ACTIVITY_RETURNED
+  JOURNAL_POST_APPROVED
+  NEW_MESSAGE
+  ACTIVITY_DUE_REMINDER
+  FAMILY_CONNECTED
+}
+
 // ============================================================
 // CORE MODELS
 // ============================================================
@@ -425,11 +435,13 @@ model UserDevice {
 }
 
 model NotificationPreference {
-  id                String  @id @default(uuid())
+  id                String           @id @default(uuid())
   user_id           String
-  notification_type String
-  enabled           Boolean @default(true)
+  notification_type NotificationType
+  enabled           Boolean          @default(true)
+
   @@unique([user_id, notification_type])
+  @@index([user_id])
 }
 
 model AuditLog {

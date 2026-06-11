@@ -35,6 +35,55 @@ export class RedisService implements OnModuleDestroy {
     return this.client;
   }
 
+  /**
+   * Set a key-value pair with optional expiry
+   */
+  async set(
+    key: string,
+    value: string,
+    expiryMode?: 'EX' | 'PX',
+    time?: number,
+  ): Promise<'OK' | null> {
+    try {
+      if (expiryMode && time) {
+        // Use uppercase mode and provide time
+        if (expiryMode === 'EX') {
+          return await this.client.set(key, value, 'EX', time);
+        } else {
+          return await this.client.set(key, value, 'PX', time);
+        }
+      }
+      return await this.client.set(key, value);
+    } catch (error: any) {
+      this.logger.warn(`Redis SET error for key ${key}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get value by key
+   */
+  async get(key: string): Promise<string | null> {
+    try {
+      return await this.client.get(key);
+    } catch (error: any) {
+      this.logger.warn(`Redis GET error for key ${key}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete one or more keys
+   */
+  async del(...keys: string[]): Promise<number> {
+    try {
+      return await this.client.del(...keys);
+    } catch (error: any) {
+      this.logger.warn(`Redis DEL error for keys ${keys.join(', ')}: ${error.message}`);
+      throw error;
+    }
+  }
+
   async onModuleDestroy() {
     await this.client.quit();
     this.logger.log('Redis connection closed');
