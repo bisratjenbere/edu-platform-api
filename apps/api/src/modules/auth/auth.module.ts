@@ -11,16 +11,18 @@ import { GoogleStrategy } from './google.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { RedisModule } from './redis.module';
 
 @Module({
   imports: [
     PrismaModule,
     ConfigModule,
+    RedisModule,   // ← single Redis connection for the whole module
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
+        secret: configService.getOrThrow<string>('JWT_SECRET'),
         signOptions: { expiresIn: '15m' },
       }),
       inject: [ConfigService],

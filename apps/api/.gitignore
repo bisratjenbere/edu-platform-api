@@ -41,3 +41,7 @@ lerna-debug.log*
 
 # Prisma
 prisma/migrations/**/*.sql
+
+# Generated module summary and migration docs
+*_SUMMARY.md
+RUN_MIGRATION.md
