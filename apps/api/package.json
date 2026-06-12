@@ -26,11 +26,11 @@
     "@aws-sdk/client-s3": "^3.1065.0",
     "@aws-sdk/cloudfront-signer": "^3.1064.0",
     "@aws-sdk/s3-request-presigner": "^3.1065.0",
-    "@nestjs/common": "^10.3.0",
+    "@nestjs/common": "^11.1.26",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.26",
-    "@nestjs/jwt": "^10.2.0",
-    "@nestjs/passport": "^10.0.3",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.26",
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/throttler": "^6.5.0",
@@ -76,6 +76,12 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "tar": "^7.4.3",
+    "@mapbox/node-pre-gyp": {
+      "tar": "^7.4.3"
+    }
   },
   "jest": {
     "moduleFileExtensions": [
