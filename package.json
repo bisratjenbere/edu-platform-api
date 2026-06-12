@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@aws-sdk/s3-presigned-post": "^3.1067.0",
+    "@nestjs/bullmq": "^11.0.4"
+  }
+}

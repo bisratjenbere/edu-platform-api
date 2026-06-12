@@ -16,6 +16,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { MessagesModule } from './modules/messages/messages.module';
 import { LibraryModule } from './modules/library/library.module';
 import { CleverModule } from './modules/clever/clever.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CleverModule } from './modules/clever/clever.module';
     MessagesModule,
     LibraryModule,
     CleverModule,
+    AiModule,
   ],
   controllers: [],
   providers: [
