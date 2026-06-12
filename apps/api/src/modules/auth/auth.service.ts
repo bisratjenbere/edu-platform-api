@@ -8,23 +8,18 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterDto, LoginDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { Redis } from 'ioredis';
 import { Role } from '@prisma/client';
 import { JwtPayload } from '../../common/types/jwt-payload.interface';
+import { RedisService } from './redis.service';
 
 @Injectable()
 export class AuthService {
-  private redis: Redis;
-
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
-  ) {
-    // Initialize Redis client
-    const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl);
-  }
+    private redis: RedisService,
+  ) {}
 
   async register(dto: RegisterDto) {
     // Check if user already exists
@@ -97,11 +92,15 @@ export class AuthService {
     });
 
     if (!user || !user.password_hash) {
-      // Increment failed attempts
+      // Increment failed attempts; only set the TTL on the first increment so
+      // the window is fixed (15 min from first failure), not sliding.
+      // A sliding window lets an attacker make 4 attempts every 14 min forever.
       if (ipAddress) {
         const attemptsKey = `login_attempts:${ipAddress}`;
-        await this.redis.incr(attemptsKey);
-        await this.redis.expire(attemptsKey, 900); // 15 minutes
+        const attempts = await this.redis.incr(attemptsKey);
+        if (attempts === 1) {
+          await this.redis.expire(attemptsKey, 900); // 15-minute fixed window
+        }
       }
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -115,11 +114,13 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(dto.password, user.password_hash);
 
     if (!isPasswordValid) {
-      // Increment failed attempts
+      // Same fixed-window increment as the user-not-found branch above
       if (ipAddress) {
         const attemptsKey = `login_attempts:${ipAddress}`;
-        await this.redis.incr(attemptsKey);
-        await this.redis.expire(attemptsKey, 900); // 15 minutes
+        const attempts = await this.redis.incr(attemptsKey);
+        if (attempts === 1) {
+          await this.redis.expire(attemptsKey, 900);
+        }
       }
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -166,10 +167,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Get stored refresh token from Redis
-    const storedToken = await this.redis.get(`refresh:${userId}`);
+    // Get stored refresh token hash from Redis
+    const storedHash = await this.redis.get(`refresh:${userId}`);
 
-    if (!storedToken || storedToken !== refreshToken) {
+    if (!storedHash || !(await bcrypt.compare(refreshToken, storedHash))) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
@@ -240,11 +241,14 @@ export class AuthService {
       expiresIn: '7d',
     });
 
-    // Store refresh token in Redis with 7-day TTL (store directly, not hashed)
+    // Store HASHED refresh token in Redis with 7-day TTL.
+    // Never store the raw JWT — if Redis is compromised, hashed tokens
+    // cannot be used directly to hijack sessions.
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await this.redis.setex(
       `refresh:${user.id}`,
-      7 * 24 * 60 * 60, // 7 days in seconds
-      refreshToken,
+      7 * 24 * 60 * 60,
+      refreshTokenHash,
     );
 
     return {
@@ -323,11 +327,4 @@ export class AuthService {
     return user;
   }
 
-  /**
-   * Cleanup method for graceful shutdown
-   */
-  async onModuleDestroy() {
-    await this.redis.quit();
-  }
 }
-

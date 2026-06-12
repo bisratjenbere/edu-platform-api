@@ -10,6 +10,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Redis } from 'ioredis';
 import * as QRCode from 'qrcode';
 import { Role } from '@prisma/client';
+import { RedisService } from './redis.service';
+import { createHash } from 'crypto';
 
 interface QrPayload {
   studentId: string;
@@ -21,16 +23,12 @@ interface QrPayload {
 
 @Injectable()
 export class QrService {
-  private redis: Redis;
-
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
-  ) {
-    const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl);
-  }
+    private redis: RedisService,
+  ) {}
 
   /**
    * Generate QR code for student login
@@ -90,7 +88,7 @@ export class QrService {
     };
 
     const token = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_SECRET'),
+      secret: this.configService.getOrThrow<string>('JWT_QR_SECRET'),
       expiresIn: '60s',
     });
 
@@ -129,7 +127,7 @@ export class QrService {
     let payload: QrPayload;
     try {
       payload = this.jwtService.verify(token, {
-        secret: this.configService.get<string>('JWT_SECRET'),
+        secret: this.configService.getOrThrow<string>('JWT_QR_SECRET'),
       }) as QrPayload;
     } catch (error) {
       throw new UnauthorizedException('Invalid or expired QR code');
@@ -140,15 +138,16 @@ export class QrService {
       throw new UnauthorizedException('Invalid QR code type');
     }
 
-    // Step 2: Check if token has been used (replay protection)
-    const isUsed = await this.redis.get(`used_qr:${token}`);
-    if (isUsed) {
+    // Step 2 + 3 (atomic): Mark token as used with SET NX BEFORE issuing session.
+    // SET NX is atomic — only one concurrent caller can win. This eliminates the
+    // check-then-set race condition that existed with separate GET + SETEX calls.
+    // Use sha256 of the token as the key to avoid storing full JWTs (200-400 bytes)
+    // as Redis keys at high scan volume.
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const claimed = await this.redis.set(`used_qr:${tokenHash}`, '1', 'EX', 60, 'NX');
+    if (!claimed) {
       throw new UnauthorizedException('QR code has already been used');
     }
-
-    // Step 3: Mark token as used with 60s TTL BEFORE issuing session
-    // TTL must equal token lifetime exactly (no grace period)
-    await this.redis.setex(`used_qr:${token}`, 60, '1');
 
     // Step 4: Get student user and issue session
     const student = await this.prisma.user.findUnique({
@@ -175,10 +174,4 @@ export class QrService {
     return student;
   }
 
-  /**
-   * Cleanup method for graceful shutdown
-   */
-  async onModuleDestroy() {
-    await this.redis.quit();
-  }
 }
