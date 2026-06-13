@@ -5,7 +5,6 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuthService } from '../auth/auth.service';
 import { CleverProfile } from './clever-api.service';
 import { Role, User } from '@prisma/client';
 
@@ -13,17 +12,15 @@ import { Role, User } from '@prisma/client';
 export class CleverService {
   private readonly logger = new Logger(CleverService.name);
 
-  constructor(
-    private prisma: PrismaService,
-    private authService: AuthService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   /**
-   * Handle Clever OAuth callback - upsert user and generate tokens
+   * Handle Clever OAuth callback - upsert/link user only.
+   * Session tokens are issued later via POST /auth/oauth/exchange.
    */
   async handleCallback(
     profile: CleverProfile,
-  ): Promise<{ user: User; isNew: boolean; accessToken: string; refreshToken: string }> {
+  ): Promise<{ user: User; isNew: boolean }> {
     this.logger.log(`Clever callback for user: ${profile.id} (${profile.email})`);
 
     // 1. Look up user by clever_id first (returning user)
@@ -127,16 +124,11 @@ export class CleverService {
       });
     }
 
-    // Update last_login_at
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { last_login_at: new Date() },
-    });
+    if (!user.is_active) {
+      throw new ForbiddenException('Authentication failed');
+    }
 
-    // 6. Generate tokens
-    const { accessToken, refreshToken } = await this.authService.generateTokens(user);
-
-    return { user, isNew, accessToken, refreshToken };
+    return { user, isNew };
   }
 
   /**

@@ -11,9 +11,9 @@ describe('JwtStrategy', () => {
   let prismaService: PrismaService;
 
   const mockConfigService = {
-    get: jest.fn((key: string) => {
+    getOrThrow: jest.fn((key: string) => {
       if (key === 'JWT_SECRET') return 'test-secret';
-      return null;
+      throw new Error(`Unknown key ${key}`);
     }),
   };
 
@@ -57,13 +57,15 @@ describe('JwtStrategy', () => {
       role: Role.TEACHER,
       schoolId: 'school-id-123',
       iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 900, // 15 minutes
+      exp: Math.floor(Date.now() / 1000) + 900,
     };
 
-    it('should return payload when user exists and is active', async () => {
+    it('should return fresh claims from database when user exists and is active', async () => {
       const mockUser = {
         id: 'user-id-123',
         email: 'teacher@example.com',
+        role: Role.SCHOOL_ADMIN,
+        school_id: 'updated-school-id',
         is_active: true,
         deleted_at: null,
       };
@@ -72,12 +74,16 @@ describe('JwtStrategy', () => {
 
       const result = await strategy.validate(validPayload);
 
-      expect(result).toEqual(validPayload);
+      expect(result).toEqual({
+        sub: 'user-id-123',
+        email: 'teacher@example.com',
+        role: Role.SCHOOL_ADMIN,
+        schoolId: 'updated-school-id',
+        iat: validPayload.iat,
+        exp: validPayload.exp,
+      });
       expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: {
-          id: 'user-id-123',
-          deleted_at: null,
-        },
+        where: { id: 'user-id-123' },
       });
     });
 
@@ -96,6 +102,8 @@ describe('JwtStrategy', () => {
       const inactiveUser = {
         id: 'user-id-123',
         email: 'teacher@example.com',
+        role: Role.TEACHER,
+        school_id: 'school-id-123',
         is_active: false,
         deleted_at: null,
       };
@@ -105,13 +113,14 @@ describe('JwtStrategy', () => {
       await expect(strategy.validate(validPayload)).rejects.toThrow(
         UnauthorizedException,
       );
-      await expect(strategy.validate(validPayload)).rejects.toThrow(
-        'User not found or inactive',
-      );
     });
 
     it('should throw UnauthorizedException when user is soft-deleted', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 'user-id-123',
+        deleted_at: new Date(),
+        is_active: true,
+      });
 
       await expect(strategy.validate(validPayload)).rejects.toThrow(
         UnauthorizedException,

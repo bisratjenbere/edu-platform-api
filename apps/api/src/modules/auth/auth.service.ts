@@ -2,39 +2,60 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
+  Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RegisterDto, LoginDto } from './dto';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { Role } from '@prisma/client';
+import { Role, User } from '@prisma/client';
 import { JwtPayload } from '../../common/types/jwt-payload.interface';
-import { RedisService } from './redis.service';
+import { RedisService } from '../../redis/redis.service';
+import { MailService } from './mail.service';
+import { randomBytes, createHash } from 'crypto';
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
+
+  private static readonly REQUIRED_SECRETS = [
+    'JWT_SECRET',
+    'JWT_REFRESH_SECRET',
+    'JWT_QR_SECRET',
+  ] as const;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
     private redis: RedisService,
+    private mail: MailService,
   ) {}
 
+  onModuleInit(): void {
+    for (const key of AuthService.REQUIRED_SECRETS) {
+      this.configService.getOrThrow<string>(key);
+    }
+  }
+
   async register(dto: RegisterDto) {
-    // Check if user already exists
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    const requiredCode = this.configService.get<string>('TEACHER_REGISTRATION_CODE');
+    if (requiredCode && dto.registrationCode !== requiredCode) {
+      throw new UnauthorizedException('Invalid registration code');
+    }
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email: dto.email, deleted_at: null },
     });
 
     if (existingUser) {
       throw new ConflictException('Email already in use');
     }
 
-    // Hash password with bcrypt (12 salt rounds per security spec)
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    // Create user with TEACHER role by default (as per requirement US-AUTH-01)
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
@@ -46,25 +67,17 @@ export class AuthService {
       },
     });
 
-    // Update last_login_at
     await this.prisma.user.update({
       where: { id: user.id },
       data: { last_login_at: new Date() },
     });
 
-    // Generate tokens
     const tokens = await this.generateTokens(user);
 
-    // Return user data without password_hash
     return {
       success: true,
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          schoolId: user.school_id,
-        },
+        user: this.formatUser(user),
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
       },
@@ -73,83 +86,55 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ipAddress?: string) {
-    // Rate limiting check (5 attempts per 15 minutes per IP)
     if (ipAddress) {
-      const attemptsKey = `login_attempts:${ipAddress}`;
-      const attempts = await this.redis.get(attemptsKey);
-      
-      if (attempts && parseInt(attempts) >= 5) {
-        throw new UnauthorizedException('Too many failed login attempts. Try again later.');
-      }
+      await this.assertLoginAttemptsAllowed(ipAddress);
     }
 
-    // Find user by email
-    const user = await this.prisma.user.findUnique({
-      where: { 
+    const user = await this.prisma.user.findFirst({
+      where: {
         email: dto.email,
         deleted_at: null,
       },
     });
 
     if (!user || !user.password_hash) {
-      // Increment failed attempts; only set the TTL on the first increment so
-      // the window is fixed (15 min from first failure), not sliding.
-      // A sliding window lets an attacker make 4 attempts every 14 min forever.
       if (ipAddress) {
-        const attemptsKey = `login_attempts:${ipAddress}`;
-        const attempts = await this.redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await this.redis.expire(attemptsKey, 900); // 15-minute fixed window
-        }
+        await this.recordFailedLoginAttempt(ipAddress);
       }
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Check if user is active
     if (!user.is_active) {
-      throw new UnauthorizedException('Account is inactive');
+      if (ipAddress) {
+        await this.recordFailedLoginAttempt(ipAddress);
+      }
+      throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Verify password
     const isPasswordValid = await bcrypt.compare(dto.password, user.password_hash);
 
     if (!isPasswordValid) {
-      // Same fixed-window increment as the user-not-found branch above
       if (ipAddress) {
-        const attemptsKey = `login_attempts:${ipAddress}`;
-        const attempts = await this.redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await this.redis.expire(attemptsKey, 900);
-        }
+        await this.recordFailedLoginAttempt(ipAddress);
       }
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Clear attempts on successful login
     if (ipAddress) {
       await this.redis.del(`login_attempts:${ipAddress}`);
     }
 
-    // Update last_login_at
     await this.prisma.user.update({
       where: { id: user.id },
       data: { last_login_at: new Date() },
     });
 
-    // Generate tokens
     const tokens = await this.generateTokens(user);
 
-    // Return user data without password_hash
-    // refreshToken is returned so the controller can set the HttpOnly cookie
     return {
       success: true,
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          schoolId: user.school_id,
-        },
+        user: this.formatUser(user),
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
       },
@@ -158,25 +143,22 @@ export class AuthService {
   }
 
   async refreshToken(userId: string, refreshToken: string) {
-    // Verify JWT signature first
     try {
       this.jwtService.verify(refreshToken, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Get stored refresh token hash from Redis
     const storedHash = await this.redis.get(`refresh:${userId}`);
 
     if (!storedHash || !(await bcrypt.compare(refreshToken, storedHash))) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Get user to generate new tokens
-    const user = await this.prisma.user.findUnique({
-      where: { 
+    const user = await this.prisma.user.findFirst({
+      where: {
         id: userId,
         deleted_at: null,
       },
@@ -186,10 +168,8 @@ export class AuthService {
       throw new UnauthorizedException('User not found or inactive');
     }
 
-    // Invalidate old refresh token (token rotation)
     await this.redis.del(`refresh:${userId}`);
 
-    // Generate new token pair
     const tokens = await this.generateTokens(user);
 
     return {
@@ -203,7 +183,6 @@ export class AuthService {
   }
 
   async logout(userId: string) {
-    // Delete refresh token from Redis
     await this.redis.del(`refresh:${userId}`);
 
     return {
@@ -215,12 +194,214 @@ export class AuthService {
     };
   }
 
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deleted_at: null },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        school_id: true,
+        first_name: true,
+        last_name: true,
+        preferred_language: true,
+        last_login_at: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      schoolId: user.school_id,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      preferredLanguage: user.preferred_language,
+      lastLoginAt: user.last_login_at,
+    };
+  }
+
   /**
-   * Generate access and refresh tokens for a user.
-   * Private — only called internally. Controllers must not call this directly.
-   * Returns both tokens so callers can set the cookie without a second DB/Redis round-trip.
+   * Create a one-time code for OAuth / magic-link completion (avoids tokens in redirect URLs).
    */
-  async generateTokens(user: { id: string; email: string; role: Role; school_id: string | null }) {
+  async createOAuthExchangeCode(userId: string): Promise<string> {
+    const code = randomBytes(32).toString('hex');
+    await this.redis.setex(
+      `oauth_code:${code}`,
+      RedisService.TTL.OAUTH_CODE_SECONDS,
+      userId,
+    );
+    return code;
+  }
+
+  async exchangeOAuthCode(code: string) {
+    const userId = await this.redis.get(`oauth_code:${code}`);
+    if (!userId) {
+      throw new UnauthorizedException('Invalid or expired login code');
+    }
+
+    await this.redis.del(`oauth_code:${code}`);
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deleted_at: null },
+    });
+
+    if (!user || !user.is_active) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { last_login_at: new Date() },
+    });
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      success: true,
+      data: {
+        user: this.formatUser(user),
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      },
+      error: null,
+    };
+  }
+
+  async createSessionForUser(user: User) {
+    const tokens = await this.generateTokens(user);
+
+    return {
+      user: this.formatUser(user),
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { email: dto.email, deleted_at: null },
+    });
+
+    if (user?.password_hash) {
+      const code = randomBytes(3).toString('hex').toUpperCase();
+      const codeHash = createHash('sha256').update(code).digest('hex');
+      await this.redis.setex(
+        `password_reset:${codeHash}`,
+        RedisService.TTL.PASSWORD_RESET_SECONDS,
+        user.id,
+      );
+
+      try {
+        await this.mail.sendPasswordResetEmail(dto.email, code);
+      } catch (error) {
+        this.logger.error(
+          `Failed to send password reset email to ${dto.email}`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        message:
+          'If an account exists with this email, a reset code has been sent.',
+      },
+      error: null,
+    };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const codeHash = createHash('sha256').update(dto.code).digest('hex');
+    const userId = await this.redis.get(`password_reset:${codeHash}`);
+
+    if (!userId) {
+      throw new UnauthorizedException('Invalid or expired reset code');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, email: dto.email, deleted_at: null },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired reset code');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password_hash: passwordHash },
+    });
+
+    await this.redis.del(`password_reset:${codeHash}`);
+    await this.redis.del(`refresh:${user.id}`);
+
+    return {
+      success: true,
+      data: { message: 'Password reset successfully' },
+      error: null,
+    };
+  }
+
+  async resolveUserIdFromRefreshToken(refreshToken: string): Promise<string | null> {
+    try {
+      const verified = this.jwtService.verify(refreshToken, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      }) as { sub: string };
+      return verified.sub;
+    } catch {
+      return null;
+    }
+  }
+
+  private async assertLoginAttemptsAllowed(ipAddress: string): Promise<void> {
+    const attemptsKey = `login_attempts:${ipAddress}`;
+    const attempts = await this.redis.get(attemptsKey);
+
+    if (attempts && parseInt(attempts, 10) >= 5) {
+      throw new UnauthorizedException(
+        'Too many failed login attempts. Try again later.',
+      );
+    }
+  }
+
+  private async recordFailedLoginAttempt(ipAddress: string): Promise<void> {
+    const attemptsKey = `login_attempts:${ipAddress}`;
+    const attempts = await this.redis.incr(attemptsKey);
+    if (attempts === 1) {
+      await this.redis.expire(
+        attemptsKey,
+        RedisService.TTL.LOGIN_WINDOW_SECONDS,
+      );
+    }
+  }
+
+  private formatUser(user: {
+    id: string;
+    email: string;
+    role: Role;
+    school_id: string | null;
+  }) {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      schoolId: user.school_id,
+    };
+  }
+
+  private async generateTokens(user: {
+    id: string;
+    email: string;
+    role: Role;
+    school_id: string | null;
+  }) {
     const payload: Omit<JwtPayload, 'iat' | 'exp'> = {
       sub: user.id,
       email: user.email,
@@ -228,26 +409,23 @@ export class AuthService {
       schoolId: user.school_id,
     };
 
-    // Generate access token (15 minutes expiry)
     const accessToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_SECRET'),
+      secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       expiresIn: '15m',
     });
 
-    // Generate refresh token (7 days expiry)
-    const refreshTokenSecret = this.configService.get<string>('JWT_REFRESH_SECRET');
+    const refreshTokenSecret = this.configService.getOrThrow<string>(
+      'JWT_REFRESH_SECRET',
+    );
     const refreshToken = this.jwtService.sign(payload, {
       secret: refreshTokenSecret,
       expiresIn: '7d',
     });
 
-    // Store HASHED refresh token in Redis with 7-day TTL.
-    // Never store the raw JWT — if Redis is compromised, hashed tokens
-    // cannot be used directly to hijack sessions.
     const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await this.redis.setex(
       `refresh:${user.id}`,
-      7 * 24 * 60 * 60,
+      RedisService.TTL.REFRESH_TOKEN_SECONDS,
       refreshTokenHash,
     );
 
@@ -257,11 +435,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * Validate and upsert user from Google OAuth profile
-   * Per US-AUTH-03: if Google email matches existing account, log in
-   * If no account exists, create one with role TEACHER
-   */
   async validateGoogleUser(profile: {
     googleId: string;
     email: string;
@@ -269,28 +442,25 @@ export class AuthService {
     lastName?: string;
     profilePhoto?: string;
   }) {
-    // First, try to find user by google_id
-    let user = await this.prisma.user.findUnique({
-      where: { 
+    let user = await this.prisma.user.findFirst({
+      where: {
         google_id: profile.googleId,
         deleted_at: null,
       },
     });
 
-    // If not found by google_id, try to find by email
     if (!user) {
-      user = await this.prisma.user.findUnique({
-        where: { 
+      user = await this.prisma.user.findFirst({
+        where: {
           email: profile.email,
           deleted_at: null,
         },
       });
 
-      // If found by email, link the google_id
       if (user) {
         user = await this.prisma.user.update({
           where: { id: user.id },
-          data: { 
+          data: {
             google_id: profile.googleId,
             last_login_at: new Date(),
           },
@@ -298,7 +468,6 @@ export class AuthService {
       }
     }
 
-    // If still no user found, create new account with TEACHER role
     if (!user) {
       user = await this.prisma.user.create({
         data: {
@@ -312,19 +481,16 @@ export class AuthService {
         },
       });
     } else {
-      // Update last_login_at for existing user
       user = await this.prisma.user.update({
         where: { id: user.id },
         data: { last_login_at: new Date() },
       });
     }
 
-    // Check if user is active
     if (!user.is_active) {
-      throw new UnauthorizedException('Account is inactive');
+      throw new UnauthorizedException('Authentication failed');
     }
 
     return user;
   }
-
 }

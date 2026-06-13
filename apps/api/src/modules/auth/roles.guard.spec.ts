@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { RolesGuard } from './roles.guard';
 import { Role } from '@prisma/client';
 import { JwtPayload } from '../../common/types/jwt-payload.interface';
@@ -117,7 +117,7 @@ describe('RolesGuard', () => {
 
       const context = createMockExecutionContext(null);
 
-      expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
+      expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
       expect(() => guard.canActivate(context)).toThrow('User not authenticated');
     });
 

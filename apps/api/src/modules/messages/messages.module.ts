@@ -5,7 +5,7 @@ import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { MessagingGateway } from './messaging.gateway';
 import { TranslationProcessor } from './translation.job';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaModule } from '../../prisma/prisma.module';
 import { RedisModule } from '../../redis/redis.module';
 
 @Module({
@@ -18,13 +18,13 @@ import { RedisModule } from '../../redis/redis.module';
       signOptions: { expiresIn: '15m' },
     }),
     RedisModule,
+    PrismaModule,
   ],
   controllers: [MessagesController],
   providers: [
     MessagesService,
     MessagingGateway,
     TranslationProcessor,
-    PrismaService,
   ],
   exports: [MessagesService, MessagingGateway],
 })

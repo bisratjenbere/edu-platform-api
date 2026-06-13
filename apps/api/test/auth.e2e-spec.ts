@@ -232,10 +232,13 @@ describe('Auth Module (e2e)', () => {
         });
     });
 
-    it('should return 401 without access token', () => {
+    it('should return 200 without access token when refresh cookie is cleared', () => {
       return request(app.getHttpServer())
         .post('/api/v1/auth/logout')
-        .expect(401);
+        .expect(200)
+        .expect((res) => {
+          expect(res.body.success).toBe(true);
+        });
     });
   });
 

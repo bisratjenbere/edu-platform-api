@@ -7,10 +7,9 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Redis } from 'ioredis';
 import * as QRCode from 'qrcode';
 import { Role } from '@prisma/client';
-import { RedisService } from './redis.service';
+import { RedisService } from '../../redis/redis.service';
 import { createHash } from 'crypto';
 
 interface QrPayload {
@@ -102,7 +101,6 @@ export class QrService {
     return {
       success: true,
       data: {
-        token,
         qrCodeDataUrl: qrDataUrl,
         expiresIn: 60,
         studentId: student.id,
@@ -144,7 +142,11 @@ export class QrService {
     // Use sha256 of the token as the key to avoid storing full JWTs (200-400 bytes)
     // as Redis keys at high scan volume.
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    const claimed = await this.redis.set(`used_qr:${tokenHash}`, '1', 'EX', 60, 'NX');
+    const claimed = await this.redis.setNx(
+      `used_qr:${tokenHash}`,
+      '1',
+      RedisService.TTL.QR_TOKEN_SECONDS,
+    );
     if (!claimed) {
       throw new UnauthorizedException('QR code has already been used');
     }

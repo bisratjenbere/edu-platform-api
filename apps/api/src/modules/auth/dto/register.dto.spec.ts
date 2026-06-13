@@ -95,7 +95,7 @@ describe('RegisterDto', () => {
       expect(errors[0].constraints).toHaveProperty('maxLength');
     });
 
-    it('should pass with exactly 8 characters', async () => {
+    it('should pass with exactly 8 characters and required complexity', async () => {
       const dto = plainToClass(RegisterDto, {
         email: 'teacher@school.edu',
         password: 'Pass123!',
@@ -105,6 +105,20 @@ describe('RegisterDto', () => {
 
       const errors = await validate(dto);
       expect(errors.length).toBe(0);
+    });
+
+    it('should fail if password lacks uppercase, lowercase, or number', async () => {
+      const dto = plainToClass(RegisterDto, {
+        email: 'teacher@school.edu',
+        password: '12345678',
+        firstName: 'Jane',
+        lastName: 'Doe',
+      });
+
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].property).toBe('password');
+      expect(errors[0].constraints).toHaveProperty('matches');
     });
   });
 

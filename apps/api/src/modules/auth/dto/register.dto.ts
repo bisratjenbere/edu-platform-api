@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, MinLength, MaxLength, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  MaxLength,
+  Matches,
+  IsOptional,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import * as sanitizeHtml from 'sanitize-html';
 
@@ -20,7 +27,20 @@ export class RegisterDto {
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters long' })
   @MaxLength(100, { message: 'Password must not exceed 100 characters' })
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/, {
+    message:
+      'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+  })
   password!: string;
+
+  @ApiProperty({
+    description: 'Registration code (required when TEACHER_REGISTRATION_CODE is set)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  registrationCode?: string;
 
   @ApiProperty({
     description: 'User first name',

@@ -7,20 +7,16 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { randomBytes } from 'crypto';
-import { Redis } from 'ioredis';
 import { Role } from '@prisma/client';
+import { RedisService } from '../../redis/redis.service';
 
 @Injectable()
 export class ClassCodeService {
-  private redis: Redis;
-
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
-  ) {
-    const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl);
-  }
+    private redis: RedisService,
+  ) {}
 
   /**
    * Generate a 6-character class code for student enrollment
@@ -238,10 +234,4 @@ export class ClassCodeService {
     return code;
   }
 
-  /**
-   * Cleanup method for graceful shutdown
-   */
-  async onModuleDestroy() {
-    await this.redis.quit();
-  }
 }

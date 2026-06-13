@@ -9,14 +9,18 @@ import {
   Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { CleverService } from './clever.service';
-import { CleverRosterSyncService, CleverSyncResult } from './clever-roster-sync.service';
+import { CleverRosterSyncService } from './clever-roster-sync.service';
+import { AuthService } from '../auth/auth.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { JwtPayload } from '../../common/types/jwt-payload.interface';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('clever')
 @Controller('clever')
@@ -26,46 +30,45 @@ export class CleverController {
   constructor(
     private cleverService: CleverService,
     private cleverSyncService: CleverRosterSyncService,
+    private authService: AuthService,
+    private configService: ConfigService,
   ) {}
 
+  @Public()
   @Get('auth/clever')
   @UseGuards(AuthGuard('clever'))
   @ApiOperation({ summary: 'Initiate Clever OAuth login' })
   @ApiResponse({ status: 302, description: 'Redirect to Clever OAuth page' })
-  async cleverLogin() {
+  cleverLogin() {
     // Passport handles the redirect
   }
 
+  @Public()
   @Get('auth/clever/callback')
   @UseGuards(AuthGuard('clever'))
   @ApiOperation({ summary: 'Clever OAuth callback' })
-  @ApiResponse({ status: 302, description: 'Redirect to app with tokens' })
+  @ApiResponse({ status: 302, description: 'Redirect to app with exchange code' })
   async cleverCallback(@Req() req: Request, @Res() res: Response) {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+
     try {
-      const cleverProfile = req.user as any;
-      
-      const { user, isNew, accessToken, refreshToken } =
-        await this.cleverService.handleCallback(cleverProfile);
+      const cleverProfile = req.user as Record<string, unknown>;
 
-      // Set refresh token as HttpOnly cookie
-      res.cookie('__rt', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
+      const { user } = await this.cleverService.handleCallback(cleverProfile as never);
 
-      this.logger.log(
-        `Clever login successful for user ${user.id} (${isNew ? 'new' : 'existing'})`,
-      );
+      const code = await this.authService.createOAuthExchangeCode(user.id);
 
-      // Redirect to frontend with access token
-      const redirectUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      res.redirect(`${redirectUrl}/auth/callback?token=${accessToken}`);
+      this.logger.log(`Clever login successful for user ${user.id}`);
+
+      res.redirect(`${frontendUrl}/auth/callback?code=${code}`);
     } catch (error) {
       this.logger.error('Clever callback failed', error);
-      const redirectUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      res.redirect(`${redirectUrl}/auth/callback?error=${encodeURIComponent(error instanceof Error ? error.message : 'Login failed')}`);
+      const message =
+        error instanceof Error ? error.message : 'Login failed';
+      res.redirect(
+        `${frontendUrl}/auth/callback?error=${encodeURIComponent(message)}`,
+      );
     }
   }
 
@@ -82,11 +85,11 @@ export class CleverController {
     },
   })
   @ApiResponse({ status: 409, description: 'Sync already in progress' })
-  async triggerSync(@Req() req: any) {
-    const user = req.user;
-    const schoolId = user.school_id;
+  async triggerSync(@Req() req: Request) {
+    const user = req.user as JwtPayload;
+    const schoolId = user.schoolId;
 
-    const result = await this.cleverSyncService.enqueueSync(schoolId, 'MANUAL');
+    const result = await this.cleverSyncService.enqueueSync(schoolId!, 'MANUAL');
 
     return {
       success: true,
@@ -142,11 +145,11 @@ export class CleverController {
       },
     },
   })
-  async getLastSyncSummary(@Req() req: any) {
-    const user = req.user;
-    const schoolId = user.school_id;
+  async getLastSyncSummary(@Req() req: Request) {
+    const user = req.user as JwtPayload;
+    const schoolId = user.schoolId;
 
-    const result = await this.cleverSyncService.getLastSyncSummary(schoolId);
+    const result = await this.cleverSyncService.getLastSyncSummary(schoolId!);
 
     if (!result) {
       return {

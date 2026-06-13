@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { ROLES_KEY } from './roles.decorator';
@@ -22,7 +28,7 @@ export class RolesGuard implements CanActivate {
     const user: JwtPayload = request.user;
 
     if (!user) {
-      throw new ForbiddenException('User not authenticated');
+      throw new UnauthorizedException('User not authenticated');
     }
 
     const hasRole = requiredRoles.includes(user.role);

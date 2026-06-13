@@ -4,22 +4,10 @@ import { ConfigService } from '@nestjs/config';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { MailService } from './mail.service';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-
-// Mock ioredis
-jest.mock('ioredis', () => {
-  const mockRedis = {
-    get: jest.fn(),
-    setex: jest.fn(),
-    del: jest.fn(),
-    quit: jest.fn(),
-  };
-  return {
-    Redis: jest.fn(() => mockRedis),
-    default: jest.fn(() => mockRedis),
-  };
-});
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -30,6 +18,7 @@ describe('AuthService', () => {
   const mockPrismaService = {
     user: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -40,12 +29,30 @@ describe('AuthService', () => {
     verify: jest.fn(),
   };
 
+  const mockMailService = {
+    sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    isConfigured: jest.fn().mockReturnValue(false),
+  };
+
+  const mockRedisService = {
+    get: jest.fn(),
+    setex: jest.fn(),
+    del: jest.fn(),
+    incr: jest.fn(),
+    expire: jest.fn(),
+    setNx: jest.fn(),
+  };
+
   const mockConfigService = {
     get: jest.fn((key: string) => {
+      if (key === 'TEACHER_REGISTRATION_CODE') return null;
+      return null;
+    }),
+    getOrThrow: jest.fn((key: string) => {
       if (key === 'JWT_SECRET') return 'test-secret';
       if (key === 'JWT_REFRESH_SECRET') return 'test-refresh-secret';
-      if (key === 'REDIS_URL') return 'redis://localhost:6379';
-      return null;
+      throw new Error(`Unknown key ${key}`);
     }),
   };
 
@@ -65,15 +72,21 @@ describe('AuthService', () => {
           provide: ConfigService,
           useValue: mockConfigService,
         },
+        {
+          provide: RedisService,
+          useValue: mockRedisService,
+        },
+        {
+          provide: MailService,
+          useValue: mockMailService,
+        },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
     prismaService = module.get<PrismaService>(PrismaService);
     jwtService = module.get<JwtService>(JwtService);
-    
-    // Get Redis mock instance
-    redis = (service as any).redis;
+    redis = mockRedisService;
   });
 
   afterEach(() => {
@@ -102,11 +115,12 @@ describe('AuthService', () => {
         is_active: true,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
       mockPrismaService.user.create.mockResolvedValue(mockUser);
       mockPrismaService.user.update.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
       redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       const result = await service.register(registerDto);
 
@@ -116,8 +130,8 @@ describe('AuthService', () => {
       expect(result.data.accessToken).toBe('access-token');
       expect(result.error).toBeNull();
 
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: { email: 'teacher@school.edu' },
+      expect(prismaService.user.findFirst).toHaveBeenCalledWith({
+        where: { email: 'teacher@school.edu', deleted_at: null },
       });
       expect(prismaService.user.create).toHaveBeenCalled();
       expect(prismaService.user.update).toHaveBeenCalledWith({
@@ -136,13 +150,13 @@ describe('AuthService', () => {
         is_active: true,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
       mockPrismaService.user.create.mockResolvedValue(mockUser);
       mockPrismaService.user.update.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValue('token');
       redis.setex.mockResolvedValue('OK');
 
-      const hashSpy = jest.spyOn(bcrypt, 'hash');
+      const hashSpy = jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       await service.register(registerDto);
 
@@ -156,7 +170,7 @@ describe('AuthService', () => {
         role: Role.TEACHER,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(existingUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(existingUser);
 
       await expect(service.register(registerDto)).rejects.toThrow(ConflictException);
       await expect(service.register(registerDto)).rejects.toThrow('Email already in use');
@@ -174,11 +188,12 @@ describe('AuthService', () => {
         is_active: true,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
       mockPrismaService.user.create.mockResolvedValue(mockUser);
       mockPrismaService.user.update.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValue('token');
       redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       await service.register(registerDto);
 
@@ -208,11 +223,12 @@ describe('AuthService', () => {
     };
 
     it('should log in user with correct credentials', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
       mockPrismaService.user.update.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
       redis.setex.mockResolvedValue('OK');
       jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       const result = await service.login(loginDto);
 
@@ -228,14 +244,14 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException if user not found', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
 
       await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
       await expect(service.login(loginDto)).rejects.toThrow('Invalid credentials');
     });
 
     it('should throw UnauthorizedException if password is incorrect', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
       jest.spyOn(bcrypt, 'compare').mockResolvedValue(false as never);
 
       await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
@@ -244,18 +260,19 @@ describe('AuthService', () => {
 
     it('should throw UnauthorizedException if user is inactive', async () => {
       const inactiveUser = { ...mockUser, is_active: false };
-      mockPrismaService.user.findUnique.mockResolvedValue(inactiveUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(inactiveUser);
 
       await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
-      await expect(service.login(loginDto)).rejects.toThrow('Account is inactive');
+      await expect(service.login(loginDto)).rejects.toThrow('Invalid credentials');
     });
 
     it('should not return password_hash in response', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
       mockPrismaService.user.update.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValue('token');
       redis.setex.mockResolvedValue('OK');
       jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       const result = await service.login(loginDto);
 
@@ -277,15 +294,15 @@ describe('AuthService', () => {
     };
 
     it('should generate new tokens when refresh token is valid', async () => {
-      // Service stores plain token (no hashing) and compares directly
-      redis.get.mockResolvedValue(refreshToken);
+      redis.get.mockResolvedValue('$2b$10$hashed-refresh');
       redis.del.mockResolvedValue(1);
       redis.setex.mockResolvedValue('OK');
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
+      jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
       mockJwtService.sign
         .mockReturnValueOnce('new-access-token')
         .mockReturnValueOnce('new-refresh-token');
-      // Mock jwtService.verify to not throw
       mockJwtService.verify = jest.fn().mockReturnValue({ sub: userId });
 
       const result = await service.refreshToken(userId, refreshToken);
@@ -311,7 +328,8 @@ describe('AuthService', () => {
 
     it('should throw UnauthorizedException if stored token does not match', async () => {
       mockJwtService.verify = jest.fn().mockReturnValue({ sub: userId });
-      redis.get.mockResolvedValue('different-token');
+      redis.get.mockResolvedValue('$2b$10$hashed-refresh');
+      jest.spyOn(bcrypt, 'compare').mockResolvedValue(false as never);
 
       await expect(service.refreshToken(userId, refreshToken)).rejects.toThrow(
         UnauthorizedException,
@@ -330,8 +348,9 @@ describe('AuthService', () => {
 
     it('should throw UnauthorizedException if user not found', async () => {
       mockJwtService.verify = jest.fn().mockReturnValue({ sub: userId });
-      redis.get.mockResolvedValue(refreshToken);
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      redis.get.mockResolvedValue('$2b$10$hashed-refresh');
+      jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
 
       await expect(service.refreshToken(userId, refreshToken)).rejects.toThrow(
         UnauthorizedException,
@@ -340,11 +359,13 @@ describe('AuthService', () => {
 
     it('should delete old token before storing new one (token rotation)', async () => {
       mockJwtService.verify = jest.fn().mockReturnValue({ sub: userId });
-      redis.get.mockResolvedValue(refreshToken);
+      redis.get.mockResolvedValue('$2b$10$hashed-refresh');
       redis.del.mockResolvedValue(1);
       redis.setex.mockResolvedValue('OK');
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
       mockJwtService.sign.mockReturnValue('token');
+      jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
 
       await service.refreshToken(userId, refreshToken);
 
@@ -387,6 +408,7 @@ describe('AuthService', () => {
 
       mockJwtService.sign.mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
       redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed-refresh' as never);
 
       await (service as any).generateTokens(mockUser);
 
@@ -413,6 +435,7 @@ describe('AuthService', () => {
 
       mockJwtService.sign.mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
       redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed-refresh' as never);
 
       await (service as any).generateTokens(mockUser);
 
@@ -424,7 +447,7 @@ describe('AuthService', () => {
       );
     });
 
-    it('should store refresh token in Redis with 7-day TTL', async () => {
+    it('should store hashed refresh token in Redis with 7-day TTL', async () => {
       const mockUser = {
         id: 'user-id-123',
         email: 'teacher@school.edu',
@@ -434,17 +457,96 @@ describe('AuthService', () => {
 
       mockJwtService.sign.mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
       redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed-refresh' as never);
 
-      const result = await service.generateTokens(mockUser);
+      const result = await (service as any).generateTokens(mockUser);
 
       expect(redis.setex).toHaveBeenCalledWith(
         'refresh:user-id-123',
         7 * 24 * 60 * 60,
-        'refresh-token',
+        'hashed-refresh',
       );
       // Both tokens returned so controller can set cookie without a second call
       expect(result.accessToken).toBe('access-token');
       expect(result.refreshToken).toBe('refresh-token');
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('should send reset email when user has a password', async () => {
+      mockPrismaService.user.findFirst.mockResolvedValue({
+        id: 'user-id-123',
+        email: 'teacher@school.edu',
+        password_hash: 'hashed',
+      });
+      redis.setex.mockResolvedValue('OK');
+
+      await service.forgotPassword({ email: 'teacher@school.edu' });
+
+      expect(mockMailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'teacher@school.edu',
+        expect.any(String),
+      );
+    });
+
+    it('should not send email when user does not exist', async () => {
+      mockPrismaService.user.findFirst.mockResolvedValue(null);
+
+      await service.forgotPassword({ email: 'missing@school.edu' });
+
+      expect(mockMailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createOAuthExchangeCode', () => {
+    it('should store a one-time code in Redis', async () => {
+      redis.setex.mockResolvedValue('OK');
+
+      const code = await service.createOAuthExchangeCode('user-id-123');
+
+      expect(code).toHaveLength(64);
+      expect(redis.setex).toHaveBeenCalledWith(
+        `oauth_code:${code}`,
+        RedisService.TTL.OAUTH_CODE_SECONDS,
+        'user-id-123',
+      );
+    });
+  });
+
+  describe('exchangeOAuthCode', () => {
+    it('should exchange a valid code for tokens', async () => {
+      const mockUser = {
+        id: 'user-id-123',
+        email: 'teacher@school.edu',
+        role: Role.TEACHER,
+        school_id: null,
+        is_active: true,
+        deleted_at: null,
+      };
+
+      redis.get.mockResolvedValue('user-id-123');
+      redis.del.mockResolvedValue(1);
+      mockPrismaService.user.findFirst.mockResolvedValue(mockUser);
+      mockPrismaService.user.update.mockResolvedValue(mockUser);
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+      redis.setex.mockResolvedValue('OK');
+      jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed' as never);
+
+      const result = await service.exchangeOAuthCode('valid-code');
+
+      expect(result.success).toBe(true);
+      expect(result.data.accessToken).toBe('access-token');
+      expect(redis.del).toHaveBeenCalledWith('oauth_code:valid-code');
+    });
+
+    it('should throw when code is missing or expired', async () => {
+      redis.get.mockResolvedValue(null);
+
+      await expect(service.exchangeOAuthCode('bad-code')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -467,7 +569,7 @@ describe('AuthService', () => {
         deleted_at: null,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(existingUser);
+      mockPrismaService.user.findFirst.mockResolvedValueOnce(existingUser);
       mockPrismaService.user.update.mockResolvedValue({
         ...existingUser,
         last_login_at: new Date(),
@@ -477,7 +579,7 @@ describe('AuthService', () => {
 
       expect(result).toBeDefined();
       expect(result.email).toBe('teacher@example.com');
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.user.findFirst).toHaveBeenCalledWith({
         where: { google_id: 'google-123', deleted_at: null },
       });
       expect(prismaService.user.update).toHaveBeenCalledWith({
@@ -497,7 +599,7 @@ describe('AuthService', () => {
       };
 
       // First call by google_id returns null, second call by email returns user
-      mockPrismaService.user.findUnique
+      mockPrismaService.user.findFirst
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(existingUserByEmail);
       
@@ -537,7 +639,7 @@ describe('AuthService', () => {
       };
 
       // Both findUnique calls return null (not found by google_id or email)
-      mockPrismaService.user.findUnique
+      mockPrismaService.user.findFirst
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
       
@@ -576,7 +678,7 @@ describe('AuthService', () => {
         deleted_at: null,
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(inactiveUser);
+      mockPrismaService.user.findFirst.mockResolvedValueOnce(inactiveUser);
       mockPrismaService.user.update.mockResolvedValue({
         ...inactiveUser,
         last_login_at: new Date(),
@@ -586,7 +688,7 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
       await expect(service.validateGoogleUser(googleProfile)).rejects.toThrow(
-        'Account is inactive',
+        'Authentication failed',
       );
     });
 
@@ -601,7 +703,7 @@ describe('AuthService', () => {
         last_login_at: new Date('2024-01-01'),
       };
 
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(existingUser);
+      mockPrismaService.user.findFirst.mockResolvedValueOnce(existingUser);
       mockPrismaService.user.update.mockResolvedValue({
         ...existingUser,
         last_login_at: new Date(),
@@ -616,13 +718,4 @@ describe('AuthService', () => {
     });
   });
 
-  describe('onModuleDestroy', () => {
-    it('should quit Redis connection', async () => {
-      redis.quit.mockResolvedValue('OK');
-
-      await service.onModuleDestroy();
-
-      expect(redis.quit).toHaveBeenCalled();
-    });
-  });
 });

@@ -6,14 +6,16 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Redis } from 'ioredis';
+import { RedisService } from '../../redis/redis.service';
 import { createHash } from 'crypto';
-import { Role, FamilyStudentStatus, NotificationType } from '@prisma/client';
+import { Role, FamilyStudentStatus, NotificationType, User } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../auth/mail.service';
 
 interface FamilyInvitePayload {
   familyStudentId: string;
@@ -22,20 +24,28 @@ interface FamilyInvitePayload {
   type: 'FAMILY_INVITE';
 }
 
+export interface FamilyInviteAcceptResult {
+  user: User;
+  connection: {
+    student_name: string;
+    class_name: string;
+  };
+  alreadyAccepted: boolean;
+}
+
 @Injectable()
 export class FamilyInviteService {
-  private redis: Redis;
+  private readonly logger = new Logger(FamilyInviteService.name);
 
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private redis: RedisService,
+    private mail: MailService,
     @Inject(forwardRef(() => NotificationsService))
     private readonly notificationsService: NotificationsService,
-  ) {
-    const redisUrl = this.configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl);
-  }
+  ) {}
 
   /**
    * Create a family invite for a student in a class
@@ -161,21 +171,37 @@ export class FamilyInviteService {
       select: { name: true },
     });
 
-    const acceptUrl = `${this.configService.get<string>('FRONTEND_URL')}/api/v1/classes/family-invites/accept?token=${token}`;
+    const apiUrl =
+      this.configService.get<string>('APP_URL') || 'http://localhost:3001';
+    const acceptUrl = `${apiUrl}/api/v1/classes/family-invites/accept?token=${token}`;
 
-    // TODO: Send email with acceptUrl using Nodemailer
-    // For now, return the token in the response for testing
+    try {
+      await this.mail.sendFamilyInviteEmail(familyUser.email, acceptUrl, {
+        studentName: `${student?.first_name ?? ''} ${student?.last_name ?? ''}`.trim(),
+        className: classRecord?.name ?? 'your class',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send family invite email to ${familyUser.email}`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
+
+    const invite: Record<string, string> = {
+      email: familyUser.email,
+      student_name: `${student?.first_name} ${student?.last_name}`,
+      class_name: classRecord?.name ?? '',
+    };
+
+    if (process.env.NODE_ENV !== 'production') {
+      invite.accept_url = acceptUrl;
+    }
 
     return {
       success: true,
       data: {
         message: 'Family invite sent successfully',
-        invite: {
-          email: familyUser.email,
-          student_name: `${student?.first_name} ${student?.last_name}`,
-          class_name: classRecord?.name,
-          accept_url: acceptUrl, // Remove this in production, only send via email
-        },
+        invite,
       },
       error: null,
     };
@@ -184,7 +210,7 @@ export class FamilyInviteService {
   /**
    * Accept a family invite
    */
-  async acceptInvite(token: string) {
+  async acceptInvite(token: string): Promise<FamilyInviteAcceptResult> {
     // Verify JWT
     let payload: FamilyInvitePayload;
     try {
@@ -199,13 +225,7 @@ export class FamilyInviteService {
       throw new UnauthorizedException('Invalid token type');
     }
 
-    // Check Redis for revocation
     const tokenHash = this.hashToken(token);
-    const exists = await this.redis.get(`family_invite:${tokenHash}`);
-
-    if (!exists) {
-      throw new UnauthorizedException('Invite has been revoked or already used');
-    }
 
     // Load FamilyStudent record
     const familyStudent = await this.prisma.familyStudent.findUnique({
@@ -241,19 +261,31 @@ export class FamilyInviteService {
       throw new UnauthorizedException('Invite has been revoked');
     }
 
-    // Idempotent: if already active, return success
+    const connection = {
+      student_name: `${familyStudent.student.first_name} ${familyStudent.student.last_name}`,
+      class_name: familyStudent.class.name,
+    };
+
+    const familyUser = await this.prisma.user.findFirst({
+      where: { id: familyStudent.family_id, deleted_at: null },
+    });
+
+    if (!familyUser || !familyUser.is_active) {
+      throw new UnauthorizedException('Family account not found or inactive');
+    }
+
     if (familyStudent.status === FamilyStudentStatus.ACTIVE) {
       return {
-        success: true,
-        data: {
-          message: 'Invite already accepted',
-          connection: {
-            student_name: `${familyStudent.student.first_name} ${familyStudent.student.last_name}`,
-            class_name: familyStudent.class.name,
-          },
-        },
-        error: null,
+        user: familyUser,
+        connection,
+        alreadyAccepted: true,
       };
+    }
+
+    // Atomically claim the invite before activating (prevents concurrent double-accept)
+    const claimed = await this.redis.del(`family_invite:${tokenHash}`);
+    if (!claimed) {
+      throw new UnauthorizedException('Invite has been revoked or already used');
     }
 
     // Activate the connection
@@ -266,9 +298,6 @@ export class FamilyInviteService {
         accepted_at: new Date(),
       },
     });
-
-    // Delete Redis key (single-use after accept)
-    await this.redis.del(`family_invite:${tokenHash}`);
 
     // Send FAMILY_CONNECTED push notification to teacher
     const teacher = await this.prisma.user.findUnique({
@@ -288,15 +317,9 @@ export class FamilyInviteService {
     }
 
     return {
-      success: true,
-      data: {
-        message: 'Successfully connected to student',
-        connection: {
-          student_name: `${familyStudent.student.first_name} ${familyStudent.student.last_name}`,
-          class_name: familyStudent.class.name,
-        },
-      },
-      error: null,
+      user: familyUser,
+      connection,
+      alreadyAccepted: false,
     };
   }
 
@@ -360,10 +383,4 @@ export class FamilyInviteService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  /**
-   * Cleanup method for graceful shutdown
-   */
-  async onModuleDestroy() {
-    await this.redis.quit();
-  }
 }

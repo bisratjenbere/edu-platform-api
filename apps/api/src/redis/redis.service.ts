@@ -7,19 +7,21 @@ export class RedisService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private readonly client: Redis;
 
+  /** TTL constants — define once, reference everywhere */
+  static readonly TTL = {
+    REFRESH_TOKEN_SECONDS: 7 * 24 * 60 * 60,
+    LOGIN_WINDOW_SECONDS: 900,
+    QR_TOKEN_SECONDS: 60,
+    OAUTH_CODE_SECONDS: 60,
+    PASSWORD_RESET_SECONDS: 900,
+  } as const;
+
   constructor(private configService: ConfigService) {
-    const redisUrl = this.configService.get<string>('REDIS_URL');
-    
-    if (!redisUrl) {
-      throw new Error('REDIS_URL environment variable is not set');
-    }
+    const redisUrl = this.configService.getOrThrow<string>('REDIS_URL');
 
     this.client = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
+      retryStrategy: (times) => Math.min(times * 50, 2000),
     });
 
     this.client.on('error', (error) => {
@@ -35,9 +37,6 @@ export class RedisService implements OnModuleDestroy {
     return this.client;
   }
 
-  /**
-   * Set a key-value pair with optional expiry
-   */
   async set(
     key: string,
     value: string,
@@ -46,64 +45,79 @@ export class RedisService implements OnModuleDestroy {
   ): Promise<'OK' | null> {
     try {
       if (expiryMode && time) {
-        // Use uppercase mode and provide time
         if (expiryMode === 'EX') {
           return await this.client.set(key, value, 'EX', time);
-        } else {
-          return await this.client.set(key, value, 'PX', time);
         }
+        return await this.client.set(key, value, 'PX', time);
       }
       return await this.client.set(key, value);
-    } catch (error: any) {
-      this.logger.warn(`Redis SET error for key ${key}: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis SET error for key ${key}: ${message}`);
       throw error;
     }
   }
 
   /**
-   * Get value by key
+   * Atomic set-if-not-exists with expiry. Returns true when the key was set.
    */
+  async setNx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    try {
+      const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis SET NX error for key ${key}: ${message}`);
+      throw error;
+    }
+  }
+
   async get(key: string): Promise<string | null> {
     try {
       return await this.client.get(key);
-    } catch (error: any) {
-      this.logger.warn(`Redis GET error for key ${key}: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis GET error for key ${key}: ${message}`);
       throw error;
     }
   }
 
-  /**
-   * Delete one or more keys
-   */
   async del(...keys: string[]): Promise<number> {
     try {
       return await this.client.del(...keys);
-    } catch (error: any) {
-      this.logger.warn(`Redis DEL error for keys ${keys.join(', ')}: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis DEL error for keys ${keys.join(', ')}: ${message}`);
       throw error;
     }
   }
 
-  /**
-   * Set a key with expiry (in seconds)
-   */
   async setex(key: string, seconds: number, value: string): Promise<'OK'> {
     try {
       return await this.client.setex(key, seconds, value);
-    } catch (error: any) {
-      this.logger.warn(`Redis SETEX error for key ${key}: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis SETEX error for key ${key}: ${message}`);
       throw error;
     }
   }
 
-  /**
-   * Increment a key's value
-   */
   async incr(key: string): Promise<number> {
     try {
       return await this.client.incr(key);
-    } catch (error: any) {
-      this.logger.warn(`Redis INCR error for key ${key}: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis INCR error for key ${key}: ${message}`);
+      throw error;
+    }
+  }
+
+  async expire(key: string, seconds: number): Promise<number> {
+    try {
+      return await this.client.expire(key, seconds);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Redis EXPIRE error for key ${key}: ${message}`);
       throw error;
     }
   }

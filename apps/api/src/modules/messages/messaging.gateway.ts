@@ -7,6 +7,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 @WebSocketGateway({
@@ -24,11 +26,14 @@ export class MessagingGateway
 
   private readonly logger = new Logger(MessagingGateway.name);
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
-      // Extract JWT from handshake auth
       const token = client.handshake.auth?.token;
 
       if (!token) {
@@ -37,17 +42,24 @@ export class MessagingGateway
         return;
       }
 
-      // Verify JWT
       const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET,
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+      }) as { sub: string };
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
       });
 
-      const userId = payload.sub;
+      if (!user || user.deleted_at || !user.is_active) {
+        this.logger.warn(`Client ${client.id} rejected: user inactive or missing`);
+        client.disconnect();
+        return;
+      }
 
-      // Join user-specific room
+      const userId = user.id;
+
       await client.join(`user:${userId}`);
 
-      // Store userId in socket data for later use
       client.data.userId = userId;
 
       this.logger.log(
@@ -68,8 +80,7 @@ export class MessagingGateway
     );
   }
 
-  // Method to emit new message to all participants in a thread
-  async emitNewMessage(recipientIds: string[], payload: any) {
+  async emitNewMessage(recipientIds: string[], payload: unknown) {
     for (const recipientId of recipientIds) {
       this.server.to(`user:${recipientId}`).emit('new-message', payload);
     }

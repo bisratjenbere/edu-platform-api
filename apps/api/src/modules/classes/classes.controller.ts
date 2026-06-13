@@ -12,7 +12,10 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Res,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,6 +25,8 @@ import { Role } from '@prisma/client';
 import { ClassesService } from './classes.service';
 import { ClassCodeService } from './class-code.service';
 import { FamilyInviteService } from './family-invite.service';
+import { AuthService } from '../auth/auth.service';
+import { Public } from '../auth/public.decorator';
 import { RosterImportService } from './roster-import.service';
 import {
   CreateClassDto,
@@ -51,6 +56,8 @@ export class ClassesController {
     private classCodeService: ClassCodeService,
     private familyInviteService: FamilyInviteService,
     private rosterImportService: RosterImportService,
+    private authService: AuthService,
+    private configService: ConfigService,
   ) {}
 
   @Post()
@@ -199,15 +206,35 @@ export class ClassesController {
     return this.familyInviteService.invite(id, req.user.id, dto.email, dto.student_id);
   }
 
+  @Public()
   @Get('family-invites/accept')
-  @ApiOperation({ summary: 'Accept a family invite (public endpoint via JWT in query)' })
-  @ApiResponse({ status: 200, description: 'Invite accepted successfully' })
+  @ApiOperation({ summary: 'Accept a family invite and redirect to app login' })
+  @ApiResponse({ status: 302, description: 'Invite accepted; redirects with OAuth exchange code' })
   @ApiResponse({ status: 401, description: 'Invalid or expired token' })
-  async acceptFamilyInvite(@Query('token') token: string) {
+  async acceptFamilyInvite(
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+
     if (!token) {
-      throw new BadRequestException('Token is required');
+      return res.redirect(
+        `${frontendUrl}/auth/callback?error=${encodeURIComponent('Token is required')}`,
+      );
     }
-    return this.familyInviteService.acceptInvite(token);
+
+    try {
+      const { user } = await this.familyInviteService.acceptInvite(token);
+      const code = await this.authService.createOAuthExchangeCode(user.id);
+      res.redirect(`${frontendUrl}/auth/callback?code=${code}`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Invite acceptance failed';
+      res.redirect(
+        `${frontendUrl}/auth/callback?error=${encodeURIComponent(message)}`,
+      );
+    }
   }
 
   @Delete(':id/family/:familyStudentId')

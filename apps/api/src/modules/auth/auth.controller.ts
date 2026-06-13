@@ -10,7 +10,6 @@ import {
   HttpStatus,
   UnauthorizedException,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
@@ -22,8 +21,21 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto } from './dto';
+import {
+  RegisterDto,
+  LoginDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  OAuthExchangeDto,
+} from './dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { Public } from './public.decorator';
+import { GoogleAuthGuard } from './google-auth.guard';
+import {
+  setRefreshTokenCookie,
+  clearRefreshTokenCookie,
+} from './auth-cookie';
+import { User } from '@prisma/client';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -34,7 +46,9 @@ export class AuthController {
     private readonly configService: ConfigService,
   ) {}
 
+  @Public()
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 3600 } })
   @ApiOperation({ summary: 'Register new teacher account' })
   @ApiResponse({ status: 201, description: 'User created successfully' })
   @ApiResponse({ status: 400, description: 'Validation error' })
@@ -44,12 +58,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.register(dto);
-    this.setRefreshTokenCookie(res, result.data.refreshToken);
-    // Strip refreshToken from response body — it lives in the cookie only
+    this.setCookieFromResult(res, result.data.refreshToken);
     const { refreshToken: _, ...data } = result.data;
     return { ...result, data };
   }
 
+  @Public()
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 900 } })
   @HttpCode(HttpStatus.OK)
@@ -63,32 +77,68 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.login(dto, req.ip);
-    this.setRefreshTokenCookie(res, result.data.refreshToken);
+    this.setCookieFromResult(res, result.data.refreshToken);
     const { refreshToken: _, ...data } = result.data;
     return { ...result, data };
   }
 
+  @Public()
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Initiate Google OAuth login' })
   @ApiResponse({ status: 302, description: 'Redirects to Google OAuth' })
-  async googleAuth() {
+  @ApiResponse({ status: 503, description: 'Google OAuth not configured' })
+  googleAuth() {
     // Guard handles redirect
   }
 
+  @Public()
   @Get('google/callback')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback' })
-  @ApiResponse({ status: 302, description: 'Redirects to frontend with tokens' })
+  @ApiResponse({ status: 302, description: 'Redirects to frontend with exchange code' })
   async googleAuthCallback(@Req() req: Request, @Res() res: Response) {
-    const user = req.user as any;
-    const tokens = await this.authService.generateTokens(user);
-    this.setRefreshTokenCookie(res, tokens.refreshToken);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/auth/callback?token=${tokens.accessToken}`);
+    const frontendUrl = this.getFrontendUrl();
+
+    if (!req.user) {
+      return res.redirect(
+        `${frontendUrl}/auth/callback?error=${encodeURIComponent('Google login failed')}`,
+      );
+    }
+
+    try {
+      const user = req.user as User;
+      const code = await this.authService.createOAuthExchangeCode(user.id);
+      res.redirect(`${frontendUrl}/auth/callback?code=${code}`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Google login failed';
+      res.redirect(
+        `${frontendUrl}/auth/callback?error=${encodeURIComponent(message)}`,
+      );
+    }
   }
 
+  @Public()
+  @Post('oauth/exchange')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange OAuth one-time code for session' })
+  @ApiResponse({ status: 200, description: 'Session created successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired code' })
+  async exchangeOAuthCode(
+    @Body() dto: OAuthExchangeDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.exchangeOAuthCode(dto.code);
+    this.setCookieFromResult(res, result.data.refreshToken);
+    const { refreshToken: _, ...data } = result.data;
+    return { ...result, data };
+  }
+
+  @Public()
   @Post('refresh')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token using HttpOnly cookie' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
@@ -103,11 +153,10 @@ export class AuthController {
       throw new UnauthorizedException('Refresh token not found');
     }
 
-    // Verify signature BEFORE trusting any payload field (gap #7 fix)
     let userId: string;
     try {
       const verified = this.jwtService.verify(refreshToken, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       }) as { sub: string };
       userId = verified.sub;
     } catch {
@@ -115,37 +164,87 @@ export class AuthController {
     }
 
     const result = await this.authService.refreshToken(userId, refreshToken);
-    this.setRefreshTokenCookie(res, result.data.refreshToken);
+    this.setCookieFromResult(res, result.data.refreshToken);
     const { refreshToken: _, ...data } = result.data;
     return { ...result, data };
   }
 
+  @Public()
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout and clear refresh token cookie' })
   @ApiResponse({ status: 200, description: 'Logged out successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async logout(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const user = req.user as { sub: string };
-    res.clearCookie('__rt', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-    });
-    return this.authService.logout(user.sub);
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    clearRefreshTokenCookie(res);
+
+    let userId: string | undefined;
+
+    const jwtUser = req.user as { sub?: string } | undefined;
+    if (jwtUser?.sub) {
+      userId = jwtUser.sub;
+    } else {
+      const refreshToken = req.cookies?.__rt;
+      if (refreshToken) {
+        userId =
+          (await this.authService.resolveUserIdFromRefreshToken(
+            refreshToken,
+          )) ?? undefined;
+      }
+    }
+
+    if (userId) {
+      return this.authService.logout(userId);
+    }
+
+    return {
+      success: true,
+      data: { message: 'Logged out successfully' },
+      error: null,
+    };
   }
 
-  private setRefreshTokenCookie(res: Response, refreshToken: string): void {
-    res.cookie('__rt', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
-    });
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current authenticated user' })
+  @ApiResponse({ status: 200, description: 'User profile returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMe(@Req() req: Request) {
+    const user = req.user as { sub: string };
+    const profile = await this.authService.getProfile(user.sub);
+    return {
+      success: true,
+      data: { user: profile },
+      error: null,
+    };
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @Throttle({ default: { limit: 5, ttl: 3600 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a password reset code' })
+  @ApiResponse({ status: 200, description: 'Reset code issued if account exists' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @Throttle({ default: { limit: 5, ttl: 3600 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using email and reset code' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired reset code' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
+  private setCookieFromResult(res: Response, refreshToken: string): void {
+    setRefreshTokenCookie(res, refreshToken);
+  }
+
+  private getFrontendUrl(): string {
+    return this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
   }
 }

@@ -15,11 +15,17 @@ describe('GoogleStrategy', () => {
   const mockConfigService = {
     get: jest.fn((key: string) => {
       const config: Record<string, string> = {
-        GOOGLE_CLIENT_ID: 'test-client-id',
-        GOOGLE_CLIENT_SECRET: 'test-client-secret',
         GOOGLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/google/callback',
       };
       return config[key];
+    }),
+    getOrThrow: jest.fn((key: string) => {
+      const config: Record<string, string> = {
+        GOOGLE_CLIENT_ID: 'test-client-id',
+        GOOGLE_CLIENT_SECRET: 'test-client-secret',
+      };
+      if (config[key]) return config[key];
+      throw new Error(`Missing ${key}`);
     }),
   };
 
@@ -89,7 +95,7 @@ describe('GoogleStrategy', () => {
       expect(done).toHaveBeenCalledWith(null, mockUser);
     });
 
-    it('should return error when no email in profile', async () => {
+    it('should return error when no verified email in profile', async () => {
       const profileWithoutEmail: Partial<Profile> = {
         id: 'google-123',
         emails: [],
@@ -108,11 +114,26 @@ describe('GoogleStrategy', () => {
       );
 
       expect(mockAuthService.validateGoogleUser).not.toHaveBeenCalled();
-      expect(done).toHaveBeenCalledWith(
-        expect.any(Error),
-        false,
+      expect(done).toHaveBeenCalledWith(expect.any(Error), false);
+      expect(done.mock.calls[0][0].message).toBe('Email not verified by Google');
+    });
+
+    it('should return error when email is not verified', async () => {
+      const profileUnverified: Partial<Profile> = {
+        id: 'google-123',
+        emails: [{ value: 'teacher@example.com', verified: false }],
+      };
+
+      const done = jest.fn();
+      await strategy.validate(
+        'access-token',
+        'refresh-token',
+        profileUnverified as Profile,
+        done,
       );
-      expect(done.mock.calls[0][0].message).toBe('No email found in Google profile');
+
+      expect(mockAuthService.validateGoogleUser).not.toHaveBeenCalled();
+      expect(done).toHaveBeenCalledWith(expect.any(Error), false);
     });
 
     it('should handle validateGoogleUser errors', async () => {

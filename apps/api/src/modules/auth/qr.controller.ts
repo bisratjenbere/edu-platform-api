@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import {
   ApiTags,
@@ -24,6 +25,8 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { Roles } from './roles.decorator';
 import { Role } from '@prisma/client';
+import { setRefreshTokenCookie } from './auth-cookie';
+import { Public } from './public.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -47,13 +50,13 @@ export class QrController {
     @Param('studentId') studentId: string,
     @Req() req: Request,
   ) {
-    const user = req.user as any;
-    const teacherId = user?.sub;
-
-    return this.qrService.generateQr(teacherId, studentId);
+    const user = req.user as { sub: string };
+    return this.qrService.generateQr(user.sub, studentId);
   }
 
+  @Public()
   @Post('qr-login')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login using QR code token' })
   @ApiResponse({ status: 200, description: 'Login successful' })
@@ -62,31 +65,16 @@ export class QrController {
     @Body() dto: QrLoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // Validate QR token and get student user
     const student = await this.qrService.validateQr(dto.token);
+    const session = await this.authService.createSessionForUser(student);
 
-    // Generate JWT tokens
-    const tokens = await this.authService.generateTokens(student);
+    setRefreshTokenCookie(res, session.refreshToken);
 
-    // Set refresh token as HttpOnly cookie
-    res.cookie('__rt', tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
-    // Return access token and user info
     return {
       success: true,
       data: {
-        user: {
-          id: student.id,
-          email: student.email,
-          role: student.role,
-          schoolId: student.school_id,
-        },
-        accessToken: tokens.accessToken,
+        user: session.user,
+        accessToken: session.accessToken,
       },
       error: null,
     };

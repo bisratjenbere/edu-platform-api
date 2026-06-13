@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Provider } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -8,16 +8,27 @@ import { QrController } from './qr.controller';
 import { QrService } from './qr.service';
 import { JwtStrategy } from './jwt.strategy';
 import { GoogleStrategy } from './google.strategy';
+import { GoogleOAuthService } from './google-oauth.service';
+import { GoogleAuthGuard } from './google-auth.guard';
+import { MailService } from './mail.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { RedisModule } from './redis.module';
+
+function isGoogleOAuthEnabled(): boolean {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  return Boolean(clientId && clientSecret);
+}
+
+function buildGoogleProviders(): Provider[] {
+  return isGoogleOAuthEnabled() ? [GoogleStrategy] : [];
+}
 
 @Module({
   imports: [
     PrismaModule,
     ConfigModule,
-    RedisModule,   // ← single Redis connection for the whole module
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -33,10 +44,13 @@ import { RedisModule } from './redis.module';
     AuthService,
     QrService,
     JwtStrategy,
-    GoogleStrategy,
+    GoogleOAuthService,
+    GoogleAuthGuard,
+    MailService,
     JwtAuthGuard,
     RolesGuard,
+    ...buildGoogleProviders(),
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule, MailService],
 })
 export class AuthModule {}

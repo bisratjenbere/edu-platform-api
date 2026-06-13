@@ -11,9 +11,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     private authService: AuthService,
   ) {
     super({
-      clientID: configService.get<string>('GOOGLE_CLIENT_ID'),
-      clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET'),
-      callbackURL: configService.get<string>('GOOGLE_CALLBACK_URL') || 'http://localhost:3001/api/v1/auth/google/callback',
+      clientID: configService.getOrThrow<string>('GOOGLE_CLIENT_ID'),
+      clientSecret: configService.getOrThrow<string>('GOOGLE_CLIENT_SECRET'),
+      callbackURL:
+        configService.get<string>('GOOGLE_CALLBACK_URL') ||
+        'http://localhost:3001/api/v1/auth/google/callback',
       scope: ['email', 'profile'],
     });
   }
@@ -23,19 +25,17 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     refreshToken: string,
     profile: Profile,
     done: VerifyCallback,
-  ): Promise<any> {
+  ): Promise<void> {
     try {
-      // Extract email from profile
-      const email = profile.emails?.[0]?.value;
-      
-      if (!email) {
-        return done(new Error('No email found in Google profile'), false);
+      const emailEntry = profile.emails?.[0];
+
+      if (!emailEntry?.value || !emailEntry.verified) {
+        return done(new Error('Email not verified by Google'), false);
       }
 
-      // Validate and upsert user via AuthService
       const user = await this.authService.validateGoogleUser({
         googleId: profile.id,
-        email,
+        email: emailEntry.value,
         firstName: profile.name?.givenName,
         lastName: profile.name?.familyName,
         profilePhoto: profile.photos?.[0]?.value,

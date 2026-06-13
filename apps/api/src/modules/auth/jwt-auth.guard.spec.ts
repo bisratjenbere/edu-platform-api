@@ -1,20 +1,43 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { IS_PUBLIC_KEY } from './public.decorator';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
+  let reflector: Reflector;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [JwtAuthGuard],
+      providers: [JwtAuthGuard, Reflector],
     }).compile();
 
     guard = module.get<JwtAuthGuard>(JwtAuthGuard);
+    reflector = module.get<Reflector>(Reflector);
   });
 
   it('should be defined', () => {
     expect(guard).toBeDefined();
+  });
+
+  describe('canActivate', () => {
+    it('should allow public routes without authentication', () => {
+      const context = {
+        getHandler: () => ({}),
+        getClass: () => ({}),
+      } as ExecutionContext;
+
+      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(true);
+
+      const result = guard.canActivate(context);
+
+      expect(result).toBe(true);
+      expect(reflector.getAllAndOverride).toHaveBeenCalledWith(IS_PUBLIC_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+    });
   });
 
   describe('handleRequest', () => {
