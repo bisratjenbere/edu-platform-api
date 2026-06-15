@@ -1,0 +1,17 @@
+{
+  "name": "Lint and type-check on save",
+  "description": "Runs ESLint and TypeScript type checking on any .ts or .tsx file save. Catches type errors and style violations before they reach CI.",
+  "trigger": {
+    "type": "fileEdited",
+    "filePattern": "**/*.{ts,tsx}"
+  },
+  "action": {
+    "type": "runTerminalCommand",
+    "command": "npx eslint ${file} --max-warnings=0 && npx tsc --noEmit --skipLibCheck 2>&1 | head -20",
+    "description": "ESLint the saved file then run a full project type check"
+  },
+  "settings": {
+    "showOutput": "onError",
+    "runInBackground": true
+  }
+}

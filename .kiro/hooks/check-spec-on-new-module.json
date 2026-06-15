@@ -1,0 +1,17 @@
+{
+  "name": "Remind to create spec when new module folder is created",
+  "description": "When a new module folder is created inside src/modules/, reminds the developer to use the Kiro spec workflow instead of writing code directly. Links them to the correct spec template.",
+  "trigger": {
+    "type": "fileCreated",
+    "filePattern": "apps/api/src/modules/**/*.module.ts"
+  },
+  "action": {
+    "type": "prompt",
+    "prompt": "A new NestJS module was just created at ${file}. Extract the module name from the file path.\n\nCheck if a corresponding spec file exists at .kiro/specs/{module-name}/requirements.md.\n\nIf it does NOT exist, respond with:\n'⚠️ No spec found for this module. Before writing any more code:\n1. Open .kiro/specs/ and find the matching spec for this module\n2. If it doesn't exist yet, create it by running a Kiro spec session first\n3. The spec defines the requirements, design, and tasks — code should follow the spec, not precede it\n\nSpec files available: list the files in .kiro/specs/'\n\nIf the spec DOES exist, respond with:\n'✅ Spec found at .kiro/specs/{module-name}/. Proceeding with implementation that matches the spec.'",
+    "description": "Check if a spec exists for the new module"
+  },
+  "settings": {
+    "showOutput": true,
+    "runInBackground": false
+  }
+}

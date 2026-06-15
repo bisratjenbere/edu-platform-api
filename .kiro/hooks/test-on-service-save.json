@@ -1,0 +1,17 @@
+{
+  "name": "Run unit tests on service save",
+  "description": "Automatically runs unit tests for the affected NestJS service whenever a .service.ts file is saved. Catches regressions immediately without manual intervention.",
+  "trigger": {
+    "type": "fileEdited",
+    "filePattern": "apps/api/src/**/*.service.ts"
+  },
+  "action": {
+    "type": "runTerminalCommand",
+    "command": "cd apps/api && npx jest --testPathPattern=$(basename ${file} .ts) --no-coverage --passWithNoTests 2>&1 | tail -30",
+    "description": "Run Jest for the matching spec file of the saved service"
+  },
+  "settings": {
+    "showOutput": true,
+    "runInBackground": true
+  }
+}

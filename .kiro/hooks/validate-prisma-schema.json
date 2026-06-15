@@ -1,0 +1,17 @@
+{
+  "name": "Validate Prisma schema on change",
+  "description": "Runs prisma validate and prisma format whenever schema.prisma is saved. Catches schema errors immediately and keeps formatting consistent. Also reminds developer to update the database-schema steering file.",
+  "trigger": {
+    "type": "fileEdited",
+    "filePattern": "**/prisma/schema.prisma"
+  },
+  "action": {
+    "type": "runTerminalCommand",
+    "command": "cd apps/api && npx prisma validate && npx prisma format && echo '✅ Schema valid. Remember to update .kiro/steering/database-schema.md with your new models.'",
+    "description": "Validate and format the Prisma schema"
+  },
+  "settings": {
+    "showOutput": true,
+    "runInBackground": false
+  }
+}
