@@ -17,6 +17,8 @@ import { MessagesModule } from './modules/messages/messages.module';
 import { LibraryModule } from './modules/library/library.module';
 import { CleverModule } from './modules/clever/clever.module';
 import { AiModule } from './modules/ai/ai.module';
+import { FluencyModule } from './modules/fluency/fluency.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { AiModule } from './modules/ai/ai.module';
     LibraryModule,
     CleverModule,
     AiModule,
+    FluencyModule,
+    AdminModule,
   ],
   controllers: [],
   providers: [
