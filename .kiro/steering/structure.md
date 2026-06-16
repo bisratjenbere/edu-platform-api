@@ -150,7 +150,7 @@ Track what is done so Kiro never regenerates completed modules:
 - [x] Phase 3 — Portfolio: Journal ✓, Assessment ✓
 - [x] Phase 4 — Communication: Messaging ✓, Notifications ✓
 - [x] Phase 5 — Discovery: Content Library ✓, AI Generator ✓
-- [ ] Phase 6 — Admin & Integrations: Admin Portal, Clever SSO (partial), Fluency
+- [ ] Phase 6 — Admin & Integrations: Admin Portal (backend complete), Clever SSO (partial), Fluency
 
 **Completed Modules (backend):**
 - ✅ Auth (JWT, Google OAuth, QR login, rate limiting, mail service)
@@ -165,11 +165,11 @@ Track what is done so Kiro never regenerates completed modules:
 - ✅ Library (Elasticsearch search, template copy/publish/rate, BullMQ sync)
 - ✅ AI Generator (12 AI features, OpenRouter integration, rate limiting, unit tests)
 - ✅ Clever SSO (OAuth flow, roster sync job — cron scheduling pending)
+- ✅ Admin Portal (backend complete: dashboard, teacher/student mgmt, bulk import, portfolio export)
 
 **Partial / pending backend work:**
 - ⚠️ Clever SSO — Task 7 (cron scheduling) not implemented
-- 🔲 Fluency — not scaffolded (FluencyAssessment model exists in schema)
-- 🔲 Admin — not scaffolded
+- 🔲 Fluency — partial (files scaffolded, implementation incomplete)
 
 **Frontend:**
 - 🔲 apps/web/ — Next.js frontend not yet scaffolded (all frontend tasks pending across all modules)

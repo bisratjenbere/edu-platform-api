@@ -2,12 +2,12 @@
 
 ## Implementation order (follow this sequence exactly)
 
-- [ ] Task 1: DTOs
+- [x] Task 1: DTOs
   - `create-teacher.dto.ts` — email (IsEmail), firstName (IsString, max 100), lastName (IsString, max 100), schoolId (IsUUID)
   - `reset-password.dto.ts` — no body required (server generates temp password)
   - `bulk-import.dto.ts` — file validated in controller (Express.Multer.File, CSV only)
 
-- [ ] Task 2: AdminService
+- [x] Task 2: AdminService
   - `getDashboard(schoolId)` — return: activeTeachers count, submissionsToday count, submissionRatePerClass array, all via Prisma aggregations
   - `getTeachers(schoolId, page, limit)` — offset-paginated, include class count per teacher
   - `createTeacher(schoolId, dto)` — create User with role = TEACHER, send welcome email via Nodemailer, log AuditLog entry
@@ -17,13 +17,13 @@
   - `getStudents(schoolId, search?, page?, limit?)` — searchable by name/email, offset-paginated
   - `exportStudentPortfolio(studentId, adminId)` — verify student is in admin's school, return JSON of all journal posts + submission metadata
 
-- [ ] Task 3: BulkImportService
+- [x] Task 3: BulkImportService
   - `import(schoolId, adminId, fileBuffer)` — parse CSV, validate headers (email, firstName, lastName, role), upsert User rows, assign school_id, return { added, updated, errors[] }
   - Expected CSV columns: `email, first_name, last_name, role` (role must be TEACHER or STUDENT)
   - Max 1000 rows per import
   - Log AuditLog entry for bulk import action
 
-- [ ] Task 4: AdminController — all endpoints
+- [x] Task 4: AdminController — all endpoints
   - `@Roles(Role.SCHOOL_ADMIN)` on all school-scoped endpoints
   - `@Roles(Role.DISTRICT_ADMIN, Role.SUPER_ADMIN)` on cross-school endpoints
   - Full OpenAPI decorators
@@ -39,7 +39,7 @@
   - Reset password action
   - Create teacher button → CreateTeacherModal
 
-- [ ] Task 7: Unit tests
+- [x] Task 7: Unit tests
   - `admin.service.spec.ts` — getDashboard (correct aggregations), createTeacher (email sent + audit log), deactivateTeacher (is_active = false + audit log), bulkImport (valid rows, invalid role, duplicate email)
 
 ---
