@@ -16,17 +16,18 @@ eduflow/
 │   │   │   ├── modules/            # Feature modules (one folder per domain)
 │   │   │   │   ├── auth/           # ✅ complete
 │   │   │   │   ├── uploads/        # ✅ complete
-│   │   │   │   ├── classes/        # ✅ DTOs only — no service/controller yet
-│   │   │   │   ├── activities/     # 🔲 not scaffolded
-│   │   │   │   ├── submissions/    # 🔲 not scaffolded
-│   │   │   │   ├── journal/        # 🔲 not scaffolded
-│   │   │   │   ├── messages/       # 🔲 not scaffolded
-│   │   │   │   ├── notifications/  # 🔲 not scaffolded
-│   │   │   │   ├── library/        # 🔲 not scaffolded
-│   │   │   │   ├── ai/             # 🔲 not scaffolded
+│   │   │   │   ├── classes/        # ✅ complete
+│   │   │   │   ├── activities/     # ✅ complete
+│   │   │   │   ├── submissions/    # ✅ complete
+│   │   │   │   ├── journal/        # ✅ complete
+│   │   │   │   ├── assessment/     # ✅ complete
+│   │   │   │   ├── messages/       # ✅ complete
+│   │   │   │   ├── notifications/  # ✅ complete
+│   │   │   │   ├── library/        # ✅ complete
+│   │   │   │   ├── ai/             # ✅ complete (12 AI features)
+│   │   │   │   ├── clever/         # ✅ complete (cron scheduling pending)
 │   │   │   │   ├── fluency/        # 🔲 not scaffolded
-│   │   │   │   ├── admin/          # 🔲 not scaffolded
-│   │   │   │   └── clever/         # 🔲 not scaffolded
+│   │   │   │   └── admin/          # 🔲 not scaffolded
 │   │   │   ├── common/             # ✅ Shared utilities
 │   │   │   │   ├── decorators/     # ✅
 │   │   │   │   ├── filters/        # ✅ Global exception filter
@@ -146,18 +147,31 @@ Track what is done so Kiro never regenerates completed modules:
 
 - [x] Phase 1 — Foundation: Auth ✓, Uploads ✓, Classes ✓
 - [x] Phase 2 — Core Learning: Activities ✓, Submissions ✓
-- [x] Phase 3 — Portfolio: Journal ✓
-- [ ] Phase 3 — Portfolio: Assessment
-- [ ] Phase 4 — Communication: Messaging, Notifications
-- [ ] Phase 5 — Discovery: Content Library, AI Generator
-- [ ] Phase 6 — Admin & Integrations: Admin Portal, Clever SSO, Fluency
+- [x] Phase 3 — Portfolio: Journal ✓, Assessment ✓
+- [x] Phase 4 — Communication: Messaging ✓, Notifications ✓
+- [x] Phase 5 — Discovery: Content Library ✓, AI Generator ✓
+- [ ] Phase 6 — Admin & Integrations: Admin Portal, Clever SSO (partial), Fluency
 
-**Completed Modules:**
-- ✅ Auth (authentication, JWT, Google OAuth, QR login)
+**Completed Modules (backend):**
+- ✅ Auth (JWT, Google OAuth, QR login, rate limiting, mail service)
 - ✅ Uploads (S3 presigned URLs, CloudFront signed URLs)
-- ✅ Classes (class management, co-teachers, roster import, family invites, class codes)
-- ✅ Activities (activity builder, blocks, publish, schedule, WebSocket submission status)
+- ✅ Classes (CRUD, co-teachers, roster import, family invites, class codes)
+- ✅ Activities (builder, 13 block types, publish, schedule, WebSocket gateway)
 - ✅ Submissions (student responses, auto-grading, revision history, teacher feedback)
 - ✅ Journal (digital portfolio, approval gate, reactions, comments, auto-post from submissions)
+- ✅ Assessment (feedback, annotations, class analytics, student progress)
+- ✅ Messaging (threads, real-time WebSocket, Google Translate, unread counts)
+- ✅ Notifications (FCM push, device registration, preferences, activity reminders)
+- ✅ Library (Elasticsearch search, template copy/publish/rate, BullMQ sync)
+- ✅ AI Generator (12 AI features, OpenRouter integration, rate limiting, unit tests)
+- ✅ Clever SSO (OAuth flow, roster sync job — cron scheduling pending)
+
+**Partial / pending backend work:**
+- ⚠️ Clever SSO — Task 7 (cron scheduling) not implemented
+- 🔲 Fluency — not scaffolded (FluencyAssessment model exists in schema)
+- 🔲 Admin — not scaffolded
+
+**Frontend:**
+- 🔲 apps/web/ — Next.js frontend not yet scaffolded (all frontend tasks pending across all modules)
 
 Update this checklist as modules are completed.

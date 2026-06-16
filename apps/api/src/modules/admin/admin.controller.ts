@@ -241,7 +241,7 @@ export class AdminController {
   })
   async bulkImport(
     @Request() req: any,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');

@@ -303,10 +303,13 @@ model ActivityAssignment {
   activity_id         String
   student_id          String
   custom_instructions String?
-  assigned_at         DateTime @default(now())
-  activity            Activity @relation(fields: [activity_id], references: [id])
-  student             User     @relation(fields: [student_id], references: [id])
+  assigned_at         DateTime  @default(now())
+  deleted_at          DateTime?
+  activity            Activity  @relation(fields: [activity_id], references: [id])
+  student             User      @relation(fields: [student_id], references: [id])
+
   @@id([activity_id, student_id])
+  @@index([student_id, deleted_at])
 }
 
 model Submission {

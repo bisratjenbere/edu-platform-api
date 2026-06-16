@@ -41,9 +41,9 @@ Thumbs.db
 *_SUMMARY.md
 RUN_MIGRATION.md
 
-# Kiro agent files — local development only
-.kiro/
-AGENTS.md
+# Kiro — commit steering, specs, and hooks; ignore only local overrides
+# .kiro/ is intentionally tracked in Git so the project config is not lost
+.kiro/settings/
 
 # IDE
 .vscode/settings.json
