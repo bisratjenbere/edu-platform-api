@@ -6,6 +6,7 @@ import { CleverStrategy } from './clever.strategy';
 import { CleverApiService } from './clever-api.service';
 import { CleverRosterSyncService } from './clever-roster-sync.service';
 import { CleverRosterSyncJob } from './clever-roster-sync.job';
+import { CleverSchedulerService } from './clever-scheduler.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { RedisModule } from '../../redis/redis.module';
 import { AuthModule } from '../auth/auth.module';
@@ -26,7 +27,8 @@ import { AuthModule } from '../auth/auth.module';
     CleverApiService,
     CleverRosterSyncService,
     CleverRosterSyncJob,
+    CleverSchedulerService,
   ],
-  exports: [CleverService, CleverApiService, CleverRosterSyncService],
+  exports: [CleverService, CleverApiService, CleverRosterSyncService, CleverSchedulerService],
 })
 export class CleverModule {}
