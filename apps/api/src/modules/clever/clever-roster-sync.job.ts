@@ -13,6 +13,7 @@ import {
   CleverSyncResult,
 } from './clever-roster-sync.service';
 import { Role } from '@prisma/client';
+import { CleverSchedulerService } from './clever-scheduler.service';
 
 @Processor('clever-roster-sync')
 export class CleverRosterSyncJob {
@@ -22,6 +23,7 @@ export class CleverRosterSyncJob {
     private prisma: PrismaService,
     private redis: RedisService,
     private cleverApi: CleverApiService,
+    private scheduler: CleverSchedulerService,
   ) {}
 
   @Process('sync')
@@ -204,6 +206,22 @@ export class CleverRosterSyncJob {
       this.logger.log(
         `Clever sync completed for school ${schoolId}: +${result.added} ~${result.updated} -${result.deactivated} errors:${result.errors.length}`,
       );
+
+      // Step 8: Re-schedule next sync if status is SUCCESS or PARTIAL
+      if (result.status === 'SUCCESS' || result.status === 'PARTIAL') {
+        const school = await this.prisma.school.findUnique({
+          where: { id: schoolId },
+          select: { timezone: true, clever_district_token: true },
+        });
+
+        if (school && school.clever_district_token) {
+          await this.scheduler.rescheduleAfterSync(
+            schoolId,
+            school.timezone,
+            school.clever_district_token,
+          );
+        }
+      }
 
       return result;
     } catch (error) {

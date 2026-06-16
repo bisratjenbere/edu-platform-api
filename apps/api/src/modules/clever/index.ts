@@ -5,3 +5,4 @@ export * from './clever.strategy';
 export * from './clever-api.service';
 export * from './clever-roster-sync.service';
 export * from './clever-roster-sync.job';
+export * from './clever-scheduler.service';
