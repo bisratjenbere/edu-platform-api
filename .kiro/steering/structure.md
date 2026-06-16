@@ -164,11 +164,11 @@ Track what is done so Kiro never regenerates completed modules:
 - ✅ Notifications (FCM push, device registration, preferences, activity reminders)
 - ✅ Library (Elasticsearch search, template copy/publish/rate, BullMQ sync)
 - ✅ AI Generator (12 AI features, OpenRouter integration, rate limiting, unit tests)
-- ✅ Clever SSO (OAuth flow, roster sync job — cron scheduling pending)
+- ✅ Clever SSO (OAuth flow, roster sync job, timezone-aware cron scheduling)
 - ✅ Admin Portal (backend complete: dashboard, teacher/student mgmt, bulk import, portfolio export)
 
 **Partial / pending backend work:**
-- ⚠️ Clever SSO — Task 7 (cron scheduling) not implemented
+- ✅ Clever SSO — Complete (all backend tasks done including cron scheduling)
 - 🔲 Fluency — partial (files scaffolded, implementation incomplete)
 
 **Frontend:**

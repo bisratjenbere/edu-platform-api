@@ -55,7 +55,7 @@
   - Release Redis lock in `finally` block — always release even on exception
   - Unit tests: new users added, existing users updated, deactivation, partial error handling, lock release on failure, empty-response guard
 
-- [ ] Task 7: Cron scheduling
+- [x] Task 7: Cron scheduling
   - At app bootstrap (main.ts), for each school with clever_enabled=true:
     - Calculate ms until next 2 AM in school.timezone using date-fns-tz
     - Enqueue a delayed BullMQ job for that school
